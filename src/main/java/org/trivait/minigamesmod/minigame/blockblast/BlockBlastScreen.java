@@ -24,17 +24,17 @@ public class BlockBlastScreen extends Screen {
     private final BlockBlast minigame;
     private final Screen parent;
     private static final int SIZE = 8;
-    private static final int GAP = 4;
-    private static final int BOARD_RADIUS = 8;
-    private static final int PANEL_H = 72;
+    private static final int GAP = 3;
+    private static final int BOARD_RADIUS = 12;
+    private static final int PANEL_H = 90;        // лоток снизу
+    private static final int HEADER_H = 56;       // шапка
     private static final long COMBO_DISPLAY_MS = 2500;
-    private static final long CLEAR_ANIM_MS = 320;
+    private static final long CLEAR_ANIM_MS = 380;
 
-    // Hover & drag state
-    private int hoverSlot = -1;         // лоток: какой слот подсвечен
-    private float dragStartX, dragStartY; // откуда начали тащить
-    private long dragStartTime = 0;      // момент подхвата
-    private static final long LIFT_MS = 120; // время анимации «поднятия»
+    // Drag state
+    private int hoverSlot = -1;
+    private long dragStartTime = 0;
+    private static final long LIFT_MS = 100;
 
     private final int[][] grid = new int[SIZE][SIZE];
     private long score = 0;
@@ -46,44 +46,71 @@ public class BlockBlastScreen extends Screen {
     private long clearAnimStart = -CLEAR_ANIM_MS;
     private final List<int[]> clearedCells = new ArrayList<>();
 
+    // ═══════════════════════════════════════════════════════════════
+    // Цвета — точно как в Block Blast (насыщенные, 3D-блоки)
+    // ═══════════════════════════════════════════════════════════════
+    // Каждый цвет: [основной, топ-блик, нижняя грань, боковая грань]
+    private static final int[][] BLOCK_PALETTES = {
+        // Синий
+        { 0xFF2979FF, 0xFF82B1FF, 0xFF1565C0, 0xFF1976D2 },
+        // Зелёный
+        { 0xFF00C853, 0xFF69F0AE, 0xFF1B5E20, 0xFF2E7D32 },
+        // Жёлтый
+        { 0xFFFFD600, 0xFFFFFF8D, 0xFFF57F17, 0xFFF9A825 },
+        // Красный / коралловый
+        { 0xFFFF1744, 0xFFFF8A80, 0xFFB71C1C, 0xFFC62828 },
+        // Фиолетовый
+        { 0xFFD500F9, 0xFFEA80FC, 0xFF6A1B9A, 0xFF7B1FA2 },
+        // Голубой / циан
+        { 0xFF00E5FF, 0xFFB2EBF2, 0xFF006064, 0xFF00838F },
+        // Оранжевый
+        { 0xFFFF6D00, 0xFFFFD180, 0xFFE65100, 0xFFF4511E },
+        // Розовый
+        { 0xFFFF4081, 0xFFFF80AB, 0xFF880E4F, 0xFFAD1457 },
+    };
+    // Основной цвет для каждого слота (используется в grid)
+    private static final int[] COLORS = {
+        0xFF2979FF, 0xFF00C853, 0xFFFFD600, 0xFFFF1744,
+        0xFFD500F9, 0xFF00E5FF, 0xFFFF6D00, 0xFFFF4081
+    };
+
+    private static final boolean[][][] SHAPES = {
+        {{true,true,true,true}},
+        {{true},{true},{true},{true}},
+        {{true,true,true}},
+        {{true},{true},{true}},
+        {{true,true}},
+        {{true},{true}},
+        {{true,true},{true,true}},
+        {{true,true},{true,true},{true,true}},
+        {{true,true,true},{true,true,true}},
+        {{true,true,true},{true,true,true},{true,true,true}},
+        {{true,false},{true,false},{true,true}},
+        {{false,true},{false,true},{true,true}},
+        {{true,true},{true,false},{true,false}},
+        {{true,true},{false,true},{false,true}},
+        {{true,true,true},{false,true,false}},
+        {{false,true,false},{true,true,true}},
+        {{true,false,false},{true,true,true}},
+        {{false,false,true},{true,true,true}},
+        {{true,true,true},{true,true,true},{false,false,false}}
+    };
+
     private static class Piece {
         final boolean[][] cells;
-        final int color;
+        final int paletteIdx;
         boolean used = false;
-        Piece(boolean[][] cells, int color) {
+        Piece(boolean[][] cells, int paletteIdx) {
             this.cells = cells;
-            this.color = color;
+            this.paletteIdx = paletteIdx;
         }
         int rows() { return cells.length; }
         int cols() { return cells[0].length; }
+        int color() { return BLOCK_PALETTES[paletteIdx][0]; }
     }
 
-    private static final boolean[][][] SHAPES = {
-            {{true, true, true, true}},
-            {{true}, {true}, {true}, {true}},
-            {{true, true, true}},
-            {{true}, {true}, {true}},
-            {{true, true}},
-            {{true}, {true}},
-            {{true, true}, {true, true}},
-            {{true, true}, {true, true}, {true, true}},
-            {{true, true, true}, {true, true, true}},
-            {{true, true, true}, {true, true, true}, {true, true, true}},
-            {{true, false}, {true, false}, {true, true}},
-            {{false, true}, {false, true}, {true, true}},
-            {{true, true}, {true, false}, {true, false}},
-            {{true, true}, {false, true}, {false, true}},
-            {{true, true, true}, {false, true, false}},
-            {{false, true, false}, {true, true, true}},
-            {{true, false, false}, {true, true, true}},
-            {{false, false, true}, {true, true, true}},
-            {{true, true, true}, {true, true, true}, {false, false, false}}
-    };
-
-    private static final int[] COLORS = {
-            0xFF4FC3F7, 0xFF81C784, 0xFFFFB74D, 0xFFE57373,
-            0xFFBA68C8, 0xFFFFD54F, 0xFF4DB6AC, 0xFFF06292
-    };
+    // paletteIdx → palette
+    private int[] gridPalette = new int[SIZE * SIZE]; // paletteIdx per cell (flattened)
 
     public BlockBlastScreen(BlockBlast minigame, Screen parent) {
         super(Component.translatable("minigame.blockblast.title"));
@@ -94,75 +121,69 @@ public class BlockBlastScreen extends Screen {
     // ─── Layout ──────────────────────────────────────────────────────────────
 
     private int cellSize() {
-        int availH = this.height - PANEL_H - 44 - 16;
-        int maxBoard = Math.min(this.width - 20, availH);
-        int cell = (maxBoard - GAP) / SIZE - GAP;
-        return Math.min(48, cell);
+        int usableH = this.height - HEADER_H - PANEL_H - 12;
+        int usableW = this.width - 24;
+        int byH = (usableH - GAP) / SIZE - GAP;
+        int byW = (usableW - GAP) / SIZE - GAP;
+        return Math.min(44, Math.min(byH, byW));
     }
 
     private int boardW() { return SIZE * (cellSize() + GAP) + GAP; }
     private int boardX() { return (this.width - boardW()) / 2; }
-    private int boardY() { return 44 + 8 + (this.height - PANEL_H - 44 - 8 - boardW()) / 2; }
+    private int boardY() {
+        int usable = this.height - HEADER_H - PANEL_H - 12;
+        return HEADER_H + 6 + (usable - boardW()) / 2;
+    }
 
-    private int trayCell() { return Math.max(10, cellSize() / 3); }
-    private int trayY() { return this.height - PANEL_H + 12; }
+    private int trayCell() { return Math.max(10, cellSize() * 10 / 28); }
+    private int trayY()    { return this.height - PANEL_H + 8; }
 
     private int trayPieceX(Piece p, int slot) {
         int slotW = boardW() / 3;
-        // Центрируем фигуру внутри слота по горизонтали
         return boardX() + slot * slotW + (slotW - p.cols() * trayCell()) / 2;
     }
-
     private int trayPieceY(Piece p) {
-        // Вертикально центрируем в области лотка
-        int trayH = PANEL_H - 20;
+        int trayH = PANEL_H - 16;
         return trayY() + (trayH - p.rows() * trayCell()) / 2;
     }
 
     // ─── Init / restart ───────────────────────────────────────────────────────
 
-    @Override
-    protected void init() {
-        restart();
-    }
+    @Override protected void init() { restart(); }
 
     private void rebuildButtons() {
         clearWidgets();
-        Button returnButton = SpriteIconButton.builder(Component.empty(), button -> this.onClose(), true)
-                .sprite(Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "icon/return"), 15, 15).build();
-        returnButton.setTooltip(Tooltip.create(Component.translatable("minigame.blockblast.undo")));
-        returnButton.setRectangle(20, 20, 10, 10);
+        Button ret = SpriteIconButton.builder(Component.empty(), b -> this.onClose(), true)
+            .sprite(Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "icon/return"), 15, 15).build();
+        ret.setTooltip(Tooltip.create(Component.translatable("minigame.blockblast.undo")));
+        ret.setRectangle(20, 20, 10, 10);
 
-        Button restartButton = SpriteIconButton.builder(Component.empty(), button -> restart(), true)
-                .sprite(Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "icon/restart"), 15, 15).build();
-        restartButton.setTooltip(Tooltip.create(Component.translatable("minigame.restart")));
-        restartButton.setRectangle(20, 20, 35, 10);
+        Button rst = SpriteIconButton.builder(Component.empty(), b -> restart(), true)
+            .sprite(Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "icon/restart"), 15, 15).build();
+        rst.setTooltip(Tooltip.create(Component.translatable("minigame.restart")));
+        rst.setRectangle(20, 20, 35, 10);
 
-        this.addRenderableWidget(restartButton);
-        this.addRenderableWidget(returnButton);
+        this.addRenderableWidget(rst);
+        this.addRenderableWidget(ret);
         this.addRenderableWidget(new ConfigButton(60, 10, minigame));
     }
 
     private void restart() {
         for (int[] row : grid) Arrays.fill(row, 0);
-        score = 0;
-        gameOver = false;
-        dragging = null;
-        combo = 0;
-        comboShowUntil = 0;
-        clearedCells.clear();
-        tray.clear();
-        hoverSlot = -1;
+        Arrays.fill(gridPalette, 0);
+        score = 0; gameOver = false; dragging = null;
+        combo = 0; comboShowUntil = 0;
+        clearedCells.clear(); tray.clear(); hoverSlot = -1;
         refillTray();
         rebuildButtons();
     }
 
     private void refillTray() {
-        Random random = new Random();
+        Random rnd = new Random();
         tray.clear();
         for (int i = 0; i < 3; i++) {
-            boolean[][] shape = SHAPES[random.nextInt(SHAPES.length)];
-            tray.add(new Piece(shape, COLORS[random.nextInt(COLORS.length)]));
+            boolean[][] shape = SHAPES[rnd.nextInt(SHAPES.length)];
+            tray.add(new Piece(shape, rnd.nextInt(BLOCK_PALETTES.length)));
         }
     }
 
@@ -172,8 +193,8 @@ public class BlockBlastScreen extends Screen {
         for (int r = 0; r < p.rows(); r++)
             for (int c = 0; c < p.cols(); c++)
                 if (p.cells[r][c]) {
-                    int gr = r0 + r, gc = c0 + c;
-                    if (gr < 0 || gr >= SIZE || gc < 0 || gc >= SIZE || grid[gr][gc] != 0) return false;
+                    int gr = r0+r, gc = c0+c;
+                    if (gr<0||gr>=SIZE||gc<0||gc>=SIZE||grid[gr][gc]!=0) return false;
                 }
         return true;
     }
@@ -181,126 +202,90 @@ public class BlockBlastScreen extends Screen {
     private boolean anyMoveLeft() {
         for (Piece p : tray) {
             if (p.used) continue;
-            for (int r = 0; r <= SIZE - p.rows(); r++)
-                for (int c = 0; c <= SIZE - p.cols(); c++)
-                    if (fits(p, r, c)) return true;
+            for (int r=0; r<=SIZE-p.rows(); r++)
+                for (int c=0; c<=SIZE-p.cols(); c++)
+                    if (fits(p,r,c)) return true;
         }
         return false;
     }
 
-    /**
-     * Вычисляем anchor: привязываем ближайшую клетку фигуры к курсору.
-     * Snap идёт по ближайшей целой позиции, а не по центру — это значительно
-     * удобнее при размещении.
-     */
-    private int[] anchorFor(Piece p, double mouseX, double mouseY) {
-        int cell = cellSize();
-        int bx = boardX(), by = boardY();
-        // Определяем «центральный» блок фигуры (для snap)
-        int halfR = p.rows() / 2;
-        int halfC = p.cols() / 2;
-
-        // Ячейка под курсором
-        int mc = (int) ((mouseX - bx - GAP) / (cell + GAP));
-        int mr = (int) ((mouseY - by - GAP) / (cell + GAP));
-
-        // Anchor = смещаем так чтобы центр фигуры совпал с ячейкой под курсором
-        int r0 = mr - halfR;
-        int c0 = mc - halfC;
-        r0 = Math.max(0, Math.min(SIZE - p.rows(), r0));
-        c0 = Math.max(0, Math.min(SIZE - p.cols(), c0));
+    private int[] anchorFor(Piece p, double mx, double my) {
+        int cell = cellSize(), bx = boardX(), by = boardY();
+        int mc = (int)((mx - bx - GAP) / (cell+GAP));
+        int mr = (int)((my - by - GAP) / (cell+GAP));
+        int r0 = Math.max(0, Math.min(SIZE-p.rows(), mr - p.rows()/2));
+        int c0 = Math.max(0, Math.min(SIZE-p.cols(), mc - p.cols()/2));
         return new int[]{r0, c0};
     }
 
-    /** Находит ближайший допустимый anchor если текущий не подходит (snap assist). */
     private int[] snapAnchor(Piece p, int r0, int c0) {
-        if (fits(p, r0, c0)) return new int[]{r0, c0};
-        // Пробуем соседние позиции с радиусом 1
-        for (int dr = -1; dr <= 1; dr++)
-            for (int dc = -1; dc <= 1; dc++) {
-                if (dr == 0 && dc == 0) continue;
-                int nr = r0 + dr, nc = c0 + dc;
-                if (nr >= 0 && nr + p.rows() <= SIZE && nc >= 0 && nc + p.cols() <= SIZE)
-                    if (fits(p, nr, nc)) return new int[]{nr, nc};
+        if (fits(p,r0,c0)) return new int[]{r0,c0};
+        for (int dr=-1; dr<=1; dr++)
+            for (int dc=-1; dc<=1; dc++) {
+                if (dr==0&&dc==0) continue;
+                int nr=r0+dr, nc=c0+dc;
+                if (nr>=0&&nr+p.rows()<=SIZE&&nc>=0&&nc+p.cols()<=SIZE&&fits(p,nr,nc))
+                    return new int[]{nr,nc};
             }
-        return new int[]{r0, c0};
+        return new int[]{r0,c0};
     }
 
-    private boolean isOverBoard(double mouseX, double mouseY) {
-        int bx = boardX(), by = boardY(), bw = boardW();
-        return mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bw;
+    private boolean isOverBoard(double mx, double my) {
+        int bx=boardX(), by=boardY(), bw=boardW();
+        return mx>=bx&&mx<bx+bw&&my>=by&&my<by+bw;
     }
 
     private void placePiece(Piece p, int r0, int c0) {
-        for (int r = 0; r < p.rows(); r++)
-            for (int c = 0; c < p.cols(); c++)
+        for (int r=0; r<p.rows(); r++)
+            for (int c=0; c<p.cols(); c++)
                 if (p.cells[r][c]) {
-                    grid[r0 + r][c0 + c] = p.color;
-                    score += 1;
+                    grid[r0+r][c0+c] = p.color();
+                    gridPalette[(r0+r)*SIZE+(c0+c)] = p.paletteIdx;
+                    score++;
                 }
         p.used = true;
 
-        List<Integer> fullRows = new ArrayList<>();
-        List<Integer> fullCols = new ArrayList<>();
-        for (int r = 0; r < SIZE; r++) {
-            boolean full = true;
-            for (int c = 0; c < SIZE; c++) if (grid[r][c] == 0) { full = false; break; }
+        List<Integer> fullRows=new ArrayList<>(), fullCols=new ArrayList<>();
+        for (int r=0; r<SIZE; r++) {
+            boolean full=true;
+            for (int c=0; c<SIZE; c++) if (grid[r][c]==0){full=false;break;}
             if (full) fullRows.add(r);
         }
-        for (int c = 0; c < SIZE; c++) {
-            boolean full = true;
-            for (int r = 0; r < SIZE; r++) if (grid[r][c] == 0) { full = false; break; }
+        for (int c=0; c<SIZE; c++) {
+            boolean full=true;
+            for (int r=0; r<SIZE; r++) if (grid[r][c]==0){full=false;break;}
             if (full) fullCols.add(c);
         }
-        int lines = fullRows.size() + fullCols.size();
-        if (lines > 0) {
+        int lines = fullRows.size()+fullCols.size();
+        if (lines>0) {
             clearedCells.clear();
-            for (int r : fullRows)
-                for (int c = 0; c < SIZE; c++) { clearedCells.add(new int[]{r, c}); grid[r][c] = 0; }
-            for (int c : fullCols)
-                for (int r = 0; r < SIZE; r++) { clearedCells.add(new int[]{r, c}); grid[r][c] = 0; }
+            for (int r : fullRows) for (int c=0; c<SIZE; c++) { clearedCells.add(new int[]{r,c,gridPalette[r*SIZE+c]}); grid[r][c]=0; }
+            for (int c : fullCols) for (int r=0; r<SIZE; r++) { clearedCells.add(new int[]{r,c,gridPalette[r*SIZE+c]}); grid[r][c]=0; }
             clearAnimStart = System.currentTimeMillis();
-
             combo++;
-            long gain = (lines * 10L + (lines - 1) * 5L) * Math.max(1, combo);
+            long gain = (lines*10L+(lines-1)*5L)*Math.max(1,combo);
             score += gain;
-            comboShowUntil = System.currentTimeMillis() + COMBO_DISPLAY_MS;
+            comboShowUntil = System.currentTimeMillis()+COMBO_DISPLAY_MS;
             saveComboRecord();
-            PlayingSoundManager.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP,
-                    Math.min(2f, 0.9f + 0.15f * combo), vol());
-            if (combo >= 2) {
-                PlayingSoundManager.playSound(SoundEvents.PLAYER_LEVELUP,
-                        Math.min(2f, 1f + 0.1f * combo), vol());
-            }
+            PlayingSoundManager.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, Math.min(2f,0.9f+0.15f*combo), vol());
+            if (combo>=2) PlayingSoundManager.playSound(SoundEvents.PLAYER_LEVELUP, Math.min(2f,1f+0.1f*combo), vol());
         } else {
-            combo = 0;
-            PlayingSoundManager.playSound(SoundEvents.WOOD_PLACE,
-                    new Random().nextFloat(0.9f, 1.2f), vol());
+            combo=0;
+            PlayingSoundManager.playSound(SoundEvents.WOOD_PLACE, new Random().nextFloat(0.9f,1.2f), vol());
         }
-
-        if (tray.stream().allMatch(x -> x.used)) refillTray();
+        if (tray.stream().allMatch(x->x.used)) refillTray();
         if (!anyMoveLeft()) {
-            gameOver = true;
-            saveBestScore();
-            minigame.onLose();
-            minigame.getLeaderboard().doPost(score);
+            gameOver=true; saveBestScore(); minigame.onLose(); minigame.getLeaderboard().doPost(score);
         }
     }
 
     private void saveBestScore() {
         BlockBlastConfig cfg = MinigameRegistry.getConfig(BlockBlastConfig.class);
-        if (score > cfg.bestScore) {
-            cfg.bestScore = score;
-            AutoConfig.getConfigHolder(BlockBlastConfig.class).save();
-        }
+        if (score>cfg.bestScore) { cfg.bestScore=score; AutoConfig.getConfigHolder(BlockBlastConfig.class).save(); }
     }
-
     private void saveComboRecord() {
         BlockBlastConfig cfg = MinigameRegistry.getConfig(BlockBlastConfig.class);
-        if (combo > cfg.bestCombo) {
-            cfg.bestCombo = combo;
-            AutoConfig.getConfigHolder(BlockBlastConfig.class).save();
-        }
+        if (combo>cfg.bestCombo) { cfg.bestCombo=combo; AutoConfig.getConfigHolder(BlockBlastConfig.class).save(); }
     }
 
     // ─── Input ────────────────────────────────────────────────────────────────
@@ -308,21 +293,15 @@ public class BlockBlastScreen extends Screen {
     @Override
     public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
         if (gameOver) return super.mouseClicked(click, doubled);
-        double mx = click.x(), my = click.y();
-
-        for (int i = 0; i < tray.size(); i++) {
-            Piece p = tray.get(i);
+        double mx=click.x(), my=click.y();
+        for (int i=0; i<tray.size(); i++) {
+            Piece p=tray.get(i);
             if (p.used) continue;
-            int px = trayPieceX(p, i);
-            int py = trayPieceY(p);
-            if (mx >= px && mx < px + p.cols() * trayCell()
-                    && my >= py && my < py + p.rows() * trayCell()) {
-                dragging = p;
-                dragStartX = (float) mx;
-                dragStartY = (float) my;
-                dragStartTime = System.currentTimeMillis();
-                PlayingSoundManager.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP,
-                        new Random().nextFloat(0.9f, 1.1f), vol());
+            int px=trayPieceX(p,i), py=trayPieceY(p);
+            int slotW=boardW()/3, slotX=boardX()+i*slotW;
+            if (mx>=slotX&&mx<slotX+slotW&&my>=trayY()&&my<trayY()+PANEL_H-16) {
+                dragging=p; dragStartTime=System.currentTimeMillis();
+                PlayingSoundManager.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, new Random().nextFloat(0.9f,1.1f), vol());
                 return true;
             }
         }
@@ -331,21 +310,14 @@ public class BlockBlastScreen extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent click) {
-        if (dragging != null && !gameOver) {
-            Piece p = dragging;
-            dragging = null;
-            double mx = click.x(), my = click.y();
-            if (isOverBoard(mx, my)) {
-                int[] a = anchorFor(p, mx, my);
-                a = snapAnchor(p, a[0], a[1]);
-                if (fits(p, a[0], a[1])) {
-                    placePiece(p, a[0], a[1]);
-                    return true;
-                }
+        if (dragging!=null&&!gameOver) {
+            Piece p=dragging; dragging=null;
+            double mx=click.x(), my=click.y();
+            if (isOverBoard(mx,my)) {
+                int[] a=anchorFor(p,mx,my); a=snapAnchor(p,a[0],a[1]);
+                if (fits(p,a[0],a[1])) { placePiece(p,a[0],a[1]); return true; }
             }
-            // Не поместилось — возвращаем
-            PlayingSoundManager.playSound(SoundEvents.WOOD_HIT,
-                    new Random().nextFloat(0.8f, 1f), vol());
+            PlayingSoundManager.playSound(SoundEvents.WOOD_HIT, new Random().nextFloat(0.8f,1f), vol());
             return true;
         }
         return super.mouseReleased(click);
@@ -353,21 +325,15 @@ public class BlockBlastScreen extends Screen {
 
     @Override
     public boolean mouseMoved(double mouseX, double mouseY) {
-        if (dragging != null) return true;
-        // Определяем hover для лотка
-        hoverSlot = -1;
-        for (int i = 0; i < tray.size(); i++) {
-            Piece p = tray.get(i);
+        if (dragging!=null) return true;
+        hoverSlot=-1;
+        int slotW=boardW()/3;
+        for (int i=0; i<tray.size(); i++) {
+            Piece p=tray.get(i);
             if (p.used) continue;
-            int px = trayPieceX(p, i);
-            int py = trayPieceY(p);
-            int slotW = boardW() / 3;
-            // Hover-зона — весь слот, а не только фигура
-            int slotX = boardX() + i * slotW;
-            if (mouseX >= slotX && mouseX < slotX + slotW
-                    && mouseY >= trayY() && mouseY < trayY() + PANEL_H - 20) {
-                hoverSlot = i;
-                break;
+            int slotX=boardX()+i*slotW;
+            if (mouseX>=slotX&&mouseX<slotX+slotW&&mouseY>=trayY()&&mouseY<trayY()+PANEL_H-16) {
+                hoverSlot=i; break;
             }
         }
         return super.mouseMoved(mouseX, mouseY);
@@ -375,238 +341,295 @@ public class BlockBlastScreen extends Screen {
 
     // ─── Drawing ──────────────────────────────────────────────────────────────
 
-    private void fillRoundedRect(GuiGraphicsExtractor context, int x, int y, int w, int h, int r, int color) {
-        if (r <= 0) { context.fill(x, y, x + w, y + h, color); return; }
-        context.fill(x + r, y, x + w - r, y + h, color);
-        context.fill(x, y + r, x + r, y + h - r, color);
-        context.fill(x + w - r, y + r, x + w, y + h - r, color);
-        for (int i = 0; i < r; i++) {
-            for (int j = 0; j < r; j++) {
-                if (Math.sqrt((double)(r - 1 - i) * (r - 1 - i) + (double)(r - 1 - j) * (r - 1 - j)) < r) {
-                    context.fill(x + i, y + j, x + i + 1, y + j + 1, color);
-                    context.fill(x + w - 1 - i, y + j, x + w - i, y + j + 1, color);
-                    context.fill(x + i, y + h - 1 - j, x + i + 1, y + h - j, color);
-                    context.fill(x + w - 1 - i, y + h - 1 - j, x + w - i, y + h - j, color);
-                }
+    /** Скруглённый прямоугольник через pixel-perfect fill */
+    private void fillRR(GuiGraphicsExtractor ctx, int x, int y, int w, int h, int r, int color) {
+        if (r<=0||w<=0||h<=0) { ctx.fill(x,y,x+w,y+h,color); return; }
+        r = Math.min(r, Math.min(w/2, h/2));
+        ctx.fill(x+r, y, x+w-r, y+h, color);
+        ctx.fill(x, y+r, x+r, y+h-r, color);
+        ctx.fill(x+w-r, y+r, x+w, y+h-r, color);
+        for (int i=0; i<r; i++) for (int j=0; j<r; j++) {
+            double d = Math.sqrt((double)(r-1-i)*(r-1-i)+(double)(r-1-j)*(r-1-j));
+            if (d<r) {
+                ctx.fill(x+i,y+j,x+i+1,y+j+1,color);
+                ctx.fill(x+w-1-i,y+j,x+w-i,y+j+1,color);
+                ctx.fill(x+i,y+h-1-j,x+i+1,y+h-j,color);
+                ctx.fill(x+w-1-i,y+h-1-j,x+w-i,y+h-j,color);
             }
         }
     }
 
-    /** Рисует один блок с бликом и лёгкой тенью снизу */
-    private void drawBlock(GuiGraphicsExtractor context, int x, int y, int size, int color) {
-        // Основной цвет
-        fillRoundedRect(context, x + 1, y + 1, size - 2, size - 2, 3, color);
-        // Блик сверху
-        int blick = ((color & 0x00FFFFFF) | 0x55FFFFFF);
-        fillRoundedRect(context, x + 3, y + 3, size - 6, (size - 6) / 2, 2, blick);
-        // Тёмный край снизу
-        int shadow = ((color >> 1) & 0x007F7F7F) | (color & 0xFF000000);
-        context.fill(x + 2, y + size - 3, x + size - 2, y + size - 1, shadow);
+    /**
+     * 3D-блок как в оригинальном Block Blast:
+     * — основной цвет
+     * — светлая верхняя панель (1/3 высоты)
+     * — тёмная нижняя грань (2px)
+     * — ещё светлый внутренний блик (маленький квадрат левее-сверху)
+     */
+    private void drawBlock3D(GuiGraphicsExtractor ctx, int x, int y, int size, int paletteIdx) {
+        int[] pal = BLOCK_PALETTES[paletteIdx % BLOCK_PALETTES.length];
+        int main   = pal[0];
+        int top    = pal[1];
+        int bottom = pal[2];
+        int side   = pal[3];
+
+        int margin = Math.max(1, size/14);
+        int inner  = size - margin*2;
+        if (inner<=0) { fillRR(ctx,x,y,size,size,2,main); return; }
+
+        int rad = Math.max(2, size/8);
+
+        // Основа
+        fillRR(ctx, x+margin, y+margin, inner, inner, rad, main);
+
+        // Нижняя грань (тень)
+        int botH = Math.max(2, size/8);
+        fillRR(ctx, x+margin, y+margin+inner-botH, inner, botH, rad/2, bottom);
+
+        // Правая грань (тень)
+        int sideW = Math.max(2, size/9);
+        ctx.fill(x+margin+inner-sideW, y+margin+rad/2, x+margin+inner, y+margin+inner-botH, side);
+
+        // Верхний блик
+        int topH = Math.max(2, inner*2/5);
+        fillRR(ctx, x+margin, y+margin, inner, topH, rad, top);
+
+        // Маленький блик-квадрат (имитация глянца)
+        int bSize = Math.max(2, size/5);
+        int bx2 = x+margin+2, by2 = y+margin+2;
+        int bAlpha = 0x55;
+        ctx.fill(bx2, by2, bx2+bSize, by2+bSize/2, (bAlpha<<24)|0xFFFFFF);
     }
 
-    /** Рисует блок с масштабом (для drag анимации) */
-    private void drawBlockF(GuiGraphicsExtractor context, float x, float y, float size, int color) {
-        drawBlock(context, (int) x, (int) y, (int) size, color);
+    /** Упрощённый drawBlock для ghost-preview (полупрозрачный) */
+    private void drawGhost(GuiGraphicsExtractor ctx, int x, int y, int size, int paletteIdx, boolean valid) {
+        int[] pal = BLOCK_PALETTES[paletteIdx % BLOCK_PALETTES.length];
+        int color = valid ? ((0x55<<24)|(pal[0]&0x00FFFFFF)) : 0x44FF3333;
+        int border = valid ? ((0xBB<<24)|(pal[0]&0x00FFFFFF)) : 0xAAFF3333;
+        int r = Math.max(2, size/8);
+        fillRR(ctx, x+1, y+1, size-2, size-2, r, color);
+        // Рамка
+        ctx.fill(x+1,y,x+size-1,y+2,border);
+        ctx.fill(x+1,y+size-2,x+size-1,y+size,border);
+        ctx.fill(x,y+1,x+2,y+size-1,border);
+        ctx.fill(x+size-2,y+1,x+size,y+size-1,border);
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
-        super.extractRenderState(context, mouseX, mouseY, delta);
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(ctx, mouseX, mouseY, delta);
 
-        int cell = cellSize();
-        int bw = boardW();
-        int bx = boardX(), by = boardY();
+        int cell = cellSize(), bw = boardW(), bx = boardX(), by = boardY();
         long now = System.currentTimeMillis();
 
-        // ── Доска ──
-        fillRoundedRect(context, bx, by, bw, bw, BOARD_RADIUS, 0xFF1E1E28);
+        // ═══════════════════════════════════════════════
+        // ФОН — тёмный сине-фиолетовый градиент (2 полосы)
+        // ═══════════════════════════════════════════════
+        ctx.fill(0, 0, this.width, this.height/2, 0xFF12122A);
+        ctx.fill(0, this.height/2, this.width, this.height, 0xFF0D0D1E);
 
-        // Линии сетки (тонкие) для ориентира
-        for (int r = 0; r < SIZE; r++)
-            for (int c = 0; c < SIZE; c++)
-                fillRoundedRect(context, bx + GAP + c * (cell + GAP), by + GAP + r * (cell + GAP),
-                        cell, cell, 3, 0xFF2E2E3A);
+        // ═══════════════════════════════════════════════
+        // ШАПКА: карточки Score / Best
+        // ═══════════════════════════════════════════════
+        long best = MinigameRegistry.getConfig(BlockBlastConfig.class).bestScore;
+        int cardW = bw/2 - 6, cardH = 38, cardY = (HEADER_H - cardH)/2;
 
-        // ── Анимация очистки линий ──
+        // Best (левая)
+        fillRR(ctx, bx, cardY, cardW, cardH, 8, 0xFF1C1C38);
+        // Accent полоска сверху
+        fillRR(ctx, bx+6, cardY, cardW-12, 3, 1, 0xFF7C4DFF);
+        ctx.centeredText(font, Component.translatable("minigame.blockblast.best"),
+            bx+cardW/2, cardY+6, 0xFFB0AECF);
+        ctx.centeredText(font, Component.literal(String.valueOf(best)),
+            bx+cardW/2, cardY+18, 0xFFFFFFFF);
+
+        // Score (правая)
+        int sCardX = bx + cardW + 12;
+        fillRR(ctx, sCardX, cardY, cardW, cardH, 8, 0xFF1C1C38);
+        fillRR(ctx, sCardX+6, cardY, cardW-12, 3, 1, 0xFFFF6D00);
+        ctx.centeredText(font, Component.translatable("minigame.blockblast.score"),
+            sCardX+cardW/2, cardY+6, 0xFFB0AECF);
+        ctx.centeredText(font, Component.literal(String.valueOf(score)),
+            sCardX+cardW/2, cardY+18, 0xFFFFFFFF);
+
+        // ═══════════════════════════════════════════════
+        // ДОСКА
+        // ═══════════════════════════════════════════════
+        // Тень под доской
+        fillRR(ctx, bx+4, by+6, bw, bw, BOARD_RADIUS, 0x44000000);
+        // Фон доски
+        fillRR(ctx, bx, by, bw, bw, BOARD_RADIUS, 0xFF161628);
+
+        // Пустые клетки (тёмные ячейки сетки)
+        for (int r=0; r<SIZE; r++)
+            for (int c=0; c<SIZE; c++)
+                fillRR(ctx,
+                    bx+GAP+c*(cell+GAP), by+GAP+r*(cell+GAP), cell, cell, 3, 0xFF1E1E35);
+
+        // ── Анимация очистки ──
         long clearAge = now - clearAnimStart;
-        boolean clearAnim = clearAge >= 0 && clearAge < CLEAR_ANIM_MS && !clearedCells.isEmpty();
+        boolean clearAnim = clearAge>=0 && clearAge<CLEAR_ANIM_MS && !clearedCells.isEmpty();
         if (!clearAnim && !clearedCells.isEmpty()) clearedCells.clear();
 
         // ── Заполненные клетки ──
-        for (int r = 0; r < SIZE; r++)
-            for (int c = 0; c < SIZE; c++)
-                if (grid[r][c] != 0)
-                    drawBlock(context,
-                            bx + GAP + c * (cell + GAP),
-                            by + GAP + r * (cell + GAP),
-                            cell, grid[r][c]);
+        for (int r=0; r<SIZE; r++)
+            for (int c=0; c<SIZE; c++)
+                if (grid[r][c]!=0)
+                    drawBlock3D(ctx,
+                        bx+GAP+c*(cell+GAP), by+GAP+r*(cell+GAP),
+                        cell, gridPalette[r*SIZE+c]);
 
-        // ── Вспышка при очистке — радужная волна ──
+        // ── Вспышка при очистке — радиальное свечение по цвету блока ──
         if (clearAnim) {
-            float t = 1f - (float) clearAge / CLEAR_ANIM_MS;
-            // Два кольца: белое + золотое
-            int alpha1 = (int)(0xCC * t) << 24;
-            int alpha2 = (int)(0x55 * t) << 24;
-            for (int[] cellPos : clearedCells) {
-                int gx = bx + GAP + cellPos[1] * (cell + GAP);
-                int gy = by + GAP + cellPos[0] * (cell + GAP);
-                fillRoundedRect(context, gx + 1, gy + 1, cell - 2, cell - 2, 3, alpha1 | 0xFFFFFF);
-                // Золотой ореол чуть больше
-                if (t > 0.4f)
-                    fillRoundedRect(context, gx - 1, gy - 1, cell + 2, cell + 2, 4, alpha2 | 0xFFD700);
+            float t = 1f - (float)clearAge/CLEAR_ANIM_MS;
+            for (int[] cp : clearedCells) {
+                int gx = bx+GAP+cp[1]*(cell+GAP), gy = by+GAP+cp[0]*(cell+GAP);
+                int pidx = cp[2];
+                int[] pal = BLOCK_PALETTES[pidx % BLOCK_PALETTES.length];
+                // Цветная вспышка основным цветом блока
+                int alpha = (int)(0xBB*t)<<24;
+                fillRR(ctx, gx, gy, cell, cell, 3, alpha|(pal[0]&0x00FFFFFF));
+                // Белый центр
+                int wa = (int)(0x99*t)<<24;
+                int margin2 = cell/4;
+                fillRR(ctx, gx+margin2, gy+margin2, cell-margin2*2, cell-margin2*2, 2, wa|0xFFFFFF);
             }
         }
 
-        // ── Призрак при перетаскивании на доску ──
-        boolean overBoard = dragging != null && !gameOver && isOverBoard(mouseX, mouseY);
+        // ── Призрак перетаскивания ──
+        boolean overBoard = dragging!=null && !gameOver && isOverBoard(mouseX, mouseY);
         if (overBoard) {
             int[] a = anchorFor(dragging, mouseX, mouseY);
             a = snapAnchor(dragging, a[0], a[1]);
             boolean ok = fits(dragging, a[0], a[1]);
-            // Подсветка целевых клеток
-            int ghostBase = dragging.color & 0x00FFFFFF;
-            int ghost = ok ? (0x55 << 24 | ghostBase) : (0x44 << 24 | 0xFF4444);
-            int border = ok ? (0x99 << 24 | ghostBase) : (0x88 << 24 | 0xFF4444);
-            for (int pr = 0; pr < dragging.rows(); pr++)
-                for (int pc = 0; pc < dragging.cols(); pc++)
+            for (int pr=0; pr<dragging.rows(); pr++)
+                for (int pc=0; pc<dragging.cols(); pc++)
                     if (dragging.cells[pr][pc]) {
-                        int gx = bx + GAP + (a[1] + pc) * (cell + GAP);
-                        int gy = by + GAP + (a[0] + pr) * (cell + GAP);
-                        fillRoundedRect(context, gx + 1, gy + 1, cell - 2, cell - 2, 3, ghost);
-                        // Рамка вокруг призрака
-                        context.fill(gx + 1, gy, gx + cell - 1, gy + 2, border);
-                        context.fill(gx + 1, gy + cell - 2, gx + cell - 1, gy + cell, border);
-                        context.fill(gx, gy + 1, gx + 2, gy + cell - 1, border);
-                        context.fill(gx + cell - 2, gy + 1, gx + cell, gy + cell - 1, border);
+                        int gx = bx+GAP+(a[1]+pc)*(cell+GAP);
+                        int gy = by+GAP+(a[0]+pr)*(cell+GAP);
+                        drawGhost(ctx, gx, gy, cell, dragging.paletteIdx, ok);
                     }
         }
 
-        // ── Лоток: фон ──
-        int trayBgY = this.height - PANEL_H + 4;
-        fillRoundedRect(context, bx, trayBgY, bw, PANEL_H - 8, 8, 0xFF1E1E28);
+        // ═══════════════════════════════════════════════
+        // ЛОТОК — снизу, закруглённая карточка
+        // ═══════════════════════════════════════════════
+        int trayBgY = this.height - PANEL_H + 2;
+        // Тень
+        fillRR(ctx, bx+3, trayBgY+5, bw, PANEL_H-6, 10, 0x33000000);
+        // Карточка лотка
+        fillRR(ctx, bx, trayBgY, bw, PANEL_H-4, 12, 0xFF1C1C38);
 
-        // Слот-разделители (лёгкие)
-        int slotW = bw / 3;
-        for (int i = 1; i < 3; i++) {
-            int lx = bx + i * slotW;
-            context.fill(lx, trayBgY + 8, lx + 1, trayBgY + PANEL_H - 16, 0xFF2E2E3A);
+        int slotW = bw/3;
+        // Разделители
+        for (int i=1; i<3; i++) {
+            int lx = bx+i*slotW;
+            ctx.fill(lx, trayBgY+10, lx+1, trayBgY+PANEL_H-18, 0xFF2A2A48);
         }
 
-        // ── Лоток: фигуры ──
-        for (int i = 0; i < tray.size(); i++) {
+        // Фигуры в лотке
+        for (int i=0; i<tray.size(); i++) {
             Piece p = tray.get(i);
-            if (p.used) continue;
-            if (p == dragging) continue;
-
-            int px = trayPieceX(p, i);
-            int py = trayPieceY(p);
+            if (p.used || p==dragging) continue;
+            int px = trayPieceX(p, i), py = trayPieceY(p);
             int tc = trayCell();
 
-            // Hover-подсветка слота
-            boolean hovered = (hoverSlot == i);
-            if (hovered) {
-                int hSlotX = bx + i * slotW + 2;
-                fillRoundedRect(context, hSlotX, trayBgY + 2, slotW - 4, PANEL_H - 12, 6, 0x22FFFFFF);
+            boolean hov = (hoverSlot==i);
+            if (hov) {
+                // Hover-подсветка слота
+                int hSlotX = bx+i*slotW+3;
+                fillRR(ctx, hSlotX, trayBgY+4, slotW-6, PANEL_H-12, 8, 0x1AFFFFFF);
             }
 
-            // Масштаб при hover: фигура чуть крупнее
-            float scale = hovered ? 1.15f : 1.0f;
-            int scaledTc = (int)(tc * scale);
-            int offX = (tc - scaledTc) * p.cols() / 2;
-            int offY = (tc - scaledTc) * p.rows() / 2;
+            float scale = hov ? 1.18f : 1.0f;
+            int scaledTc = (int)(tc*scale);
+            int offX = (tc*p.cols()-scaledTc*p.cols())/2;
+            int offY = (tc*p.rows()-scaledTc*p.rows())/2;
 
-            for (int pr = 0; pr < p.rows(); pr++)
-                for (int pc = 0; pc < p.cols(); pc++)
+            for (int pr=0; pr<p.rows(); pr++)
+                for (int pc=0; pc<p.cols(); pc++)
                     if (p.cells[pr][pc])
-                        drawBlock(context,
-                                px + offX + pc * scaledTc,
-                                py + offY + pr * scaledTc,
-                                scaledTc, p.color);
+                        drawBlock3D(ctx,
+                            px+offX+pc*scaledTc, py+offY+pr*scaledTc,
+                            scaledTc, p.paletteIdx);
         }
 
-        // ── Перетаскиваемая фигура — следует за курсором ──
-        if (dragging != null && !gameOver) {
-            // Плавное увеличение при подъёме (easing)
+        // ═══════════════════════════════════════════════
+        // ПЕРЕТАСКИВАЕМАЯ ФИГУРА
+        // ═══════════════════════════════════════════════
+        if (dragging!=null && !gameOver) {
             long liftAge = now - dragStartTime;
-            float liftT = Math.min(1f, (float) liftAge / LIFT_MS);
-            // Ease out cubic
-            liftT = 1f - (1f - liftT) * (1f - liftT) * (1f - liftT);
+            float liftT = Math.min(1f, (float)liftAge/LIFT_MS);
+            liftT = 1f - (1f-liftT)*(1f-liftT)*(1f-liftT);
 
-            float baseSize = trayCell();
-            float targetSize = overBoard ? cellSize() * 0.95f : trayCell() * 1.2f;
-            float dragCellF = baseSize + (targetSize - baseSize) * liftT;
+            float baseS = trayCell();
+            float targetS = overBoard ? cellSize()*0.92f : trayCell()*1.22f;
+            float dragCell = baseS + (targetS-baseS)*liftT;
 
-            int px = (int)(mouseX - dragging.cols() * dragCellF / 2);
-            int py = (int)(mouseY - dragging.rows() * dragCellF * 0.5f - dragging.rows() * dragCellF * 0.1f * liftT);
+            // Поднимаем над курсором
+            int px = (int)(mouseX - dragging.cols()*dragCell/2);
+            int py = (int)(mouseY - dragging.rows()*dragCell/2 - dragging.rows()*dragCell*0.12f*liftT);
 
-            // Тень под фигурой (только пока не на доске)
-            if (!overBoard && liftT > 0.3f) {
-                float shadowAlpha = 0.25f * liftT;
-                int sa = (int)(shadowAlpha * 255) << 24;
-                int shadowOff = (int)(4 * liftT);
-                for (int pr = 0; pr < dragging.rows(); pr++)
-                    for (int pc = 0; pc < dragging.cols(); pc++)
-                        if (dragging.cells[pr][pc]) {
-                            int sx = px + (int)(pc * dragCellF) + shadowOff;
-                            int sy2 = py + (int)(pr * dragCellF) + shadowOff;
-                            fillRoundedRect(context, sx + 1, sy2 + 1, (int) dragCellF - 2, (int) dragCellF - 2, 3, sa);
-                        }
+            // Тень
+            if (liftT>0.2f) {
+                float sa = 0.3f*liftT;
+                int sAlpha = (int)(sa*255)<<24;
+                int sOff = (int)(6*liftT);
+                for (int pr=0; pr<dragging.rows(); pr++)
+                    for (int pc=0; pc<dragging.cols(); pc++)
+                        if (dragging.cells[pr][pc])
+                            fillRR(ctx,
+                                px+(int)(pc*dragCell)+sOff,
+                                py+(int)(pr*dragCell)+sOff,
+                                (int)dragCell, (int)dragCell, 3, sAlpha);
             }
 
-            for (int pr = 0; pr < dragging.rows(); pr++)
-                for (int pc = 0; pc < dragging.cols(); pc++)
-                    if (dragging.cells[pr][pc]) {
-                        int bxi = px + (int)(pc * dragCellF);
-                        int byi = py + (int)(pr * dragCellF);
-                        drawBlock(context, bxi, byi, (int) dragCellF, dragging.color);
-                    }
+            // Сама фигура
+            for (int pr=0; pr<dragging.rows(); pr++)
+                for (int pc=0; pc<dragging.cols(); pc++)
+                    if (dragging.cells[pr][pc])
+                        drawBlock3D(ctx,
+                            px+(int)(pc*dragCell), py+(int)(pr*dragCell),
+                            (int)dragCell, dragging.paletteIdx);
         }
 
-        // ── Счёт и рекорд ──
-        int sbW = bw / 2 - 4, sbH = 32;
-        int sx = bx + sbW + 8, sy = by - sbH - 6;
-        long best = MinigameRegistry.getConfig(BlockBlastConfig.class).bestScore;
-        long bestComboRec = MinigameRegistry.getConfig(BlockBlastConfig.class).bestCombo;
-
-        fillRoundedRect(context, sx, sy, sbW, sbH, 5, 0xFF1E1E28);
-        context.centeredText(font, Component.translatable("minigame.blockblast.score"),
-                sx + sbW / 2, sy + 4, 0xFFB0B0C0);
-        context.centeredText(font, Component.literal(String.valueOf(score)),
-                sx + sbW / 2, sy + 16, 0xFFFFFFFF);
-
-        fillRoundedRect(context, bx, sy, sbW, sbH, 5, 0xFF1E1E28);
-        context.centeredText(font, Component.translatable("minigame.blockblast.best"),
-                bx + sbW / 2, sy + 4, 0xFFB0B0C0);
-        context.centeredText(font, Component.literal(String.valueOf(best)),
-                bx + sbW / 2, sy + 16, 0xFFFFFFFF);
-
-        // ── Комбо-плашка ──
-        if (combo >= 2 && now < comboShowUntil) {
-            float fade = Math.min(1f, (float)(comboShowUntil - now) / 600f);
-            int alpha = (int)(0xFF * fade);
-            String comboText = Component.translatable("minigame.blockblast.combo", combo).getString();
-            int textW = font.width(comboText);
-            int cx = this.width / 2 - textW / 2 - 8;
-            int cy = by + bw + 8;
-            fillRoundedRect(context, cx, cy, textW + 16, 16, 5, (alpha / 3) << 24 | 0x00FFD54F);
-            context.centeredText(font, Component.literal(comboText),
-                    this.width / 2, cy + 4, (alpha << 24) | 0xFFD54F);
+        // ═══════════════════════════════════════════════
+        // КОМБО-ПЛАШКА
+        // ═══════════════════════════════════════════════
+        if (combo>=2 && now<comboShowUntil) {
+            float fade = Math.min(1f,(float)(comboShowUntil-now)/600f);
+            int alpha = (int)(0xFF*fade);
+            String txt = Component.translatable("minigame.blockblast.combo", combo).getString();
+            int tw = font.width(txt);
+            int cx = this.width/2 - tw/2 - 10, cy = by - 24;
+            fillRR(ctx, cx, cy, tw+20, 18, 9, (alpha/3)<<24|0x00FF6D00);
+            ctx.centeredText(font, Component.literal(txt), this.width/2, cy+5, (alpha<<24)|0xFFD700);
         }
 
-        // ── Game over оверлей ──
+        // ═══════════════════════════════════════════════
+        // GAME OVER
+        // ═══════════════════════════════════════════════
         if (gameOver) {
-            fillRoundedRect(context, bx, by, bw, bw, BOARD_RADIUS, 0xBB0A0A14);
-            context.centeredText(font, Component.translatable("minigame.blockblast.game_over"),
-                    this.width / 2, by + bw / 2 - 20, 0xFFFF5555);
-            context.centeredText(font, Component.literal(String.valueOf(score)),
-                    this.width / 2, by + bw / 2 - 6, 0xFFFFFFFF);
-            context.centeredText(font, Component.translatable("minigame.blockblast.best_combo",
-                    Math.max(bestComboRec, combo)),
-                    this.width / 2, by + bw / 2 + 8, 0xFFFFD54F);
-            // Подсказка «нажмите restart»
-            String hint = "Press Restart to play again";
-            context.centeredText(font, Component.literal(hint),
-                    this.width / 2, by + bw / 2 + 24, 0xFF808090);
+            long bestCombo = MinigameRegistry.getConfig(BlockBlastConfig.class).bestCombo;
+            // Затемнение доски
+            fillRR(ctx, bx, by, bw, bw, BOARD_RADIUS, 0xCC050510);
+
+            // Центральная карточка Game Over
+            int goW = bw - 20, goH = 70, goX = bx+10, goY = by+bw/2-goH/2;
+            fillRR(ctx, goX, goY, goW, goH, 12, 0xFF1C1C38);
+            fillRR(ctx, goX+8, goY, goW-16, 3, 1, 0xFFFF1744);
+
+            ctx.centeredText(font, Component.translatable("minigame.blockblast.game_over"),
+                this.width/2, goY+10, 0xFFFF5252);
+            ctx.centeredText(font, Component.literal(String.valueOf(score)),
+                this.width/2, goY+24, 0xFFFFFFFF);
+            ctx.centeredText(font, Component.translatable("minigame.blockblast.best_combo",
+                Math.max(bestCombo, combo)),
+                this.width/2, goY+38, 0xFFFFD700);
+
+            String hint = "▶  Restart to play again";
+            ctx.centeredText(font, Component.literal(hint),
+                this.width/2, goY+54, 0xFF7C7CA0);
         }
     }
 
@@ -614,15 +637,11 @@ public class BlockBlastScreen extends Screen {
         return PlayingSoundManager.vol(MinigameRegistry.getConfig(BlockBlastVisibleConfig.class).volume);
     }
 
-    @Override
-    public void onClose() {
+    @Override public void onClose() {
         if (!gameOver) saveBestScore();
         minigame.onStop();
         this.minecraft.gui.setScreen(parent);
     }
 
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
+    @Override public boolean isPauseScreen() { return false; }
 }
