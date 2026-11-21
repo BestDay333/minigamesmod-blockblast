@@ -14,6 +14,7 @@ import org.trivait.minigamesmod.api.MinigameRegistry;
 import org.trivait.minigamesmod.config.Config;
 import org.trivait.minigamesmod.config.MinigameLayoutConfig;
 import org.trivait.minigamesmod.leaderboard.SheetsApi;
+import org.trivait.minigamesmod.minigame.blockblast.BlockBlast;
 import org.trivait.minigamesmod.minigame.bubbleshooter.BubbleShooter;
 import org.trivait.minigamesmod.minigame.chess.Chess;
 import org.trivait.minigamesmod.minigame.cookieclicker.CookieClicker;
@@ -50,6 +51,7 @@ public class MinigamesMod implements ClientModInitializer {
         MinigameRegistry.register(new CookieClicker());
         MinigameRegistry.register(new Solitaire());
         MinigameRegistry.register(new Chess());
+        MinigameRegistry.register(new BlockBlast());
 
         MinigameLayoutConfig.get().sync();
 
