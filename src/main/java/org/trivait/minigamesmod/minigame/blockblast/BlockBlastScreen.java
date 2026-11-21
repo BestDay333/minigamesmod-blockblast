@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.StringJoiner;
 
 public class BlockBlastScreen extends Screen {
     private final BlockBlast minigame;
@@ -149,7 +150,11 @@ public class BlockBlastScreen extends Screen {
 
     // ─── Init / restart ───────────────────────────────────────────────────────
 
-    @Override protected void init() { restart(); }
+    @Override
+    protected void init() {
+        if (!loadSavedGame()) restart();
+        else rebuildButtons();
+    }
 
     private void rebuildButtons() {
         clearWidgets();
@@ -175,7 +180,88 @@ public class BlockBlastScreen extends Screen {
         combo = 0; comboShowUntil = 0;
         clearedCells.clear(); tray.clear(); hoverSlot = -1;
         refillTray();
+        clearSavedGame();
         rebuildButtons();
+    }
+
+    // ─── Save / Load ──────────────────────────────────────────────────────────
+
+    /** Сохраняем всё состояние партии в строку в конфиге. */
+    private void saveGame() {
+        if (gameOver) { clearSavedGame(); return; }
+        BlockBlastConfig cfg = MinigameRegistry.getConfig(BlockBlastConfig.class);
+        StringBuilder sb = new StringBuilder();
+        sb.append(score).append(';');
+        // grid (64 ints)
+        for (int r = 0; r < SIZE; r++) for (int c = 0; c < SIZE; c++) sb.append(grid[r][c]).append(',');
+        sb.append(';');
+        // gridPalette (64 ints)
+        for (int v : gridPalette) sb.append(v).append(',');
+        sb.append(';');
+        // combo
+        sb.append(combo).append(';');
+        // tray: 3 слота, каждый — "used|paletteIdx|rows|cols|cells..."
+        for (Piece p : tray) {
+            sb.append(p.used ? 1 : 0).append('|');
+            sb.append(p.paletteIdx).append('|');
+            sb.append(p.rows()).append('|').append(p.cols()).append('|');
+            for (boolean[] row : p.cells) for (boolean v : row) sb.append(v ? 1 : 0);
+            sb.append(';');
+        }
+        cfg.savedGame = sb.toString();
+        AutoConfig.getConfigHolder(BlockBlastConfig.class).save();
+    }
+
+    /** Загружаем сохранённую партию. Возвращает false если нет сохранения или оно повреждено. */
+    private boolean loadSavedGame() {
+        BlockBlastConfig cfg = MinigameRegistry.getConfig(BlockBlastConfig.class);
+        String s = cfg.savedGame;
+        if (s == null || s.isEmpty()) return false;
+        try {
+            String[] parts = s.split(";", -1);
+            // parts: [score, grid, palette, combo, tray0, tray1, tray2]
+            if (parts.length < 7) return false;
+            score = Long.parseLong(parts[0]);
+            // grid
+            String[] gv = parts[1].split(",");
+            if (gv.length < SIZE*SIZE) return false;
+            for (int r = 0; r < SIZE; r++) for (int c = 0; c < SIZE; c++)
+                grid[r][c] = Integer.parseInt(gv[r*SIZE+c]);
+            // palette
+            String[] pv = parts[2].split(",");
+            if (pv.length < SIZE*SIZE) return false;
+            for (int i = 0; i < SIZE*SIZE; i++) gridPalette[i] = Integer.parseInt(pv[i]);
+            // combo
+            combo = Integer.parseInt(parts[3]);
+            // tray
+            tray.clear();
+            for (int i = 0; i < 3; i++) {
+                String[] tp = parts[4 + i].split("\\|");
+                boolean used = tp[0].equals("1");
+                int paletteIdx = Integer.parseInt(tp[1]);
+                int rows = Integer.parseInt(tp[2]);
+                int cols = Integer.parseInt(tp[3]);
+                String cellStr = tp[4];
+                boolean[][] cells = new boolean[rows][cols];
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < cols; c++)
+                        cells[r][c] = cellStr.charAt(r*cols+c) == '1';
+                Piece p = new Piece(cells, paletteIdx);
+                p.used = used;
+                tray.add(p);
+            }
+            gameOver = false; dragging = null; hoverSlot = -1;
+            clearedCells.clear();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void clearSavedGame() {
+        BlockBlastConfig cfg = MinigameRegistry.getConfig(BlockBlastConfig.class);
+        cfg.savedGame = "";
+        AutoConfig.getConfigHolder(BlockBlastConfig.class).save();
     }
 
     private void refillTray() {
@@ -276,6 +362,9 @@ public class BlockBlastScreen extends Screen {
         if (tray.stream().allMatch(x->x.used)) refillTray();
         if (!anyMoveLeft()) {
             gameOver=true; saveBestScore(); minigame.onLose(); minigame.getLeaderboard().doPost(score);
+            clearSavedGame();
+        } else {
+            saveGame();
         }
     }
 
@@ -637,8 +726,12 @@ public class BlockBlastScreen extends Screen {
         return PlayingSoundManager.vol(MinigameRegistry.getConfig(BlockBlastVisibleConfig.class).volume);
     }
 
-    @Override public void onClose() {
-        if (!gameOver) saveBestScore();
+    @Override
+    public void onClose() {
+        if (!gameOver) {
+            saveBestScore();
+            saveGame();
+        }
         minigame.onStop();
         this.minecraft.gui.setScreen(parent);
     }
