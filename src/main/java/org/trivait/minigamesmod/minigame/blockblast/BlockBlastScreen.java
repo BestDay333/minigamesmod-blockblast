@@ -413,8 +413,8 @@ public class BlockBlastScreen extends Screen {
     }
 
     @Override
-    public boolean mouseMoved(double mouseX, double mouseY) {
-        if (dragging!=null) return true;
+    public void mouseMoved(double mouseX, double mouseY) {
+        if (dragging!=null) return;
         hoverSlot=-1;
         int slotW=boardW()/3;
         for (int i=0; i<tray.size(); i++) {
@@ -425,7 +425,7 @@ public class BlockBlastScreen extends Screen {
                 hoverSlot=i; break;
             }
         }
-        return super.mouseMoved(mouseX, mouseY);
+        super.mouseMoved(mouseX, mouseY);
     }
 
     // ─── Drawing ──────────────────────────────────────────────────────────────
