@@ -47,6 +47,13 @@ public class BlockBlastScreen extends Screen {
     private long clearAnimStart = -CLEAR_ANIM_MS;
     private final List<int[]> clearedCells = new ArrayList<>();
 
+    // Плавные анимации: сглаженная позиция/масштаб перетаскивания, масштаб слотов лотка
+    private float dragX, dragY;              // сглаженная позиция курсора при драге
+    private float dragScale = 0f;            // сглаженный размер клетки фигуры в руке
+    private long lastFrameMs = 0;
+    private final float[] slotScale = new float[3]; // плавный hover-масштаб лотка
+    private long comboShowStart = 0;
+
     // ═══════════════════════════════════════════════════════════════
     // Цвета — точно как в Block Blast (насыщенные, 3D-блоки)
     // ═══════════════════════════════════════════════════════════════
@@ -177,7 +184,9 @@ public class BlockBlastScreen extends Screen {
         for (int[] row : grid) Arrays.fill(row, 0);
         Arrays.fill(gridPalette, 0);
         score = 0; gameOver = false; dragging = null;
-        combo = 0; comboShowUntil = 0;
+        combo = 0; comboShowUntil = 0; comboShowStart = 0;
+        Arrays.fill(slotScale, 1f);
+        dragScale = 0f; lastFrameMs = 0;
         clearedCells.clear(); tray.clear(); hoverSlot = -1;
         refillTray();
         clearSavedGame();
@@ -351,7 +360,8 @@ public class BlockBlastScreen extends Screen {
             combo++;
             long gain = (lines*10L+(lines-1)*5L)*Math.max(1,combo);
             score += gain;
-            comboShowUntil = System.currentTimeMillis()+COMBO_DISPLAY_MS;
+            comboShowStart = System.currentTimeMillis();
+            comboShowUntil = comboShowStart+COMBO_DISPLAY_MS;
             saveComboRecord();
             PlayingSoundManager.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, Math.min(2f,0.9f+0.15f*combo), vol());
             if (combo>=2) PlayingSoundManager.playSound(SoundEvents.PLAYER_LEVELUP, Math.min(2f,1f+0.1f*combo), vol());
@@ -390,6 +400,8 @@ public class BlockBlastScreen extends Screen {
             int slotW=boardW()/3, slotX=boardX()+i*slotW;
             if (mx>=slotX&&mx<slotX+slotW&&my>=trayY()&&my<trayY()+PANEL_H-16) {
                 dragging=p; dragStartTime=System.currentTimeMillis();
+                // старт сглаживания из текущей точки курсора — без прыжка
+                dragX=(float)mx; dragY=(float)my; dragScale=trayCell();
                 PlayingSoundManager.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, new Random().nextFloat(0.9f,1.1f), vol());
                 return true;
             }
@@ -511,11 +523,31 @@ public class BlockBlastScreen extends Screen {
         int cell = cellSize(), bw = boardW(), bx = boardX(), by = boardY();
         long now = System.currentTimeMillis();
 
+        // ── Сглаживание (экспоненциальное, кадронезависимое) ──
+        float dt = Math.max(16f, now - lastFrameMs);
+        lastFrameMs = now;
+        float k = 1f - (float)Math.exp(-dt / 55f);   // константа времени ~55 мс
+
+        boolean overBoard = dragging!=null && !gameOver && isOverBoard(mouseX, mouseY);
+        if (dragging!=null) {
+            dragX += (mouseX-dragX)*k;
+            dragY += (mouseY-dragY)*k;
+            float targetS = overBoard ? cellSize()*0.92f : trayCell()*1.22f;
+            dragScale += (targetS-dragScale)*k;
+        } else {
+            dragX = mouseX; dragY = mouseY;
+        }
+        // Плавный hover-масштаб слотов лотка
+        for (int i=0; i<3; i++) {
+            float target = (dragging==null && hoverSlot==i) ? 1.16f : 1.0f;
+            slotScale[i] += (target-slotScale[i])*k;
+        }
+
         // ═══════════════════════════════════════════════
-        // ФОН — тёмный сине-фиолетовый градиент (2 полосы)
+        // ФОН — полупрозрачный сине-фиолетовый градиент (мир просвечивает)
         // ═══════════════════════════════════════════════
-        ctx.fill(0, 0, this.width, this.height/2, 0xFF12122A);
-        ctx.fill(0, this.height/2, this.width, this.height, 0xFF0D0D1E);
+        ctx.fill(0, 0, this.width, this.height/2, 0x8C12122A);
+        ctx.fill(0, this.height/2, this.width, this.height, 0x7C0D0D1E);
 
         // ═══════════════════════════════════════════════
         // ШАПКА: карточки Score / Best
@@ -524,9 +556,9 @@ public class BlockBlastScreen extends Screen {
         int cardW = bw/2 - 6, cardH = 38, cardY = (HEADER_H - cardH)/2;
 
         // Best (левая)
-        fillRR(ctx, bx, cardY, cardW, cardH, 8, 0xFF1C1C38);
+        fillRR(ctx, bx, cardY, cardW, cardH, 8, 0xA81C1C38);
         // Accent полоска сверху
-        fillRR(ctx, bx+6, cardY, cardW-12, 3, 1, 0xFF7C4DFF);
+        fillRR(ctx, bx+6, cardY, cardW-12, 3, 1, 0xB37C4DFF);
         ctx.centeredText(font, Component.translatable("minigame.blockblast.best"),
             bx+cardW/2, cardY+6, 0xFFB0AECF);
         ctx.centeredText(font, Component.literal(String.valueOf(best)),
@@ -534,8 +566,8 @@ public class BlockBlastScreen extends Screen {
 
         // Score (правая)
         int sCardX = bx + cardW + 12;
-        fillRR(ctx, sCardX, cardY, cardW, cardH, 8, 0xFF1C1C38);
-        fillRR(ctx, sCardX+6, cardY, cardW-12, 3, 1, 0xFFFF6D00);
+        fillRR(ctx, sCardX, cardY, cardW, cardH, 8, 0xA81C1C38);
+        fillRR(ctx, sCardX+6, cardY, cardW-12, 3, 1, 0xB3FF6D00);
         ctx.centeredText(font, Component.translatable("minigame.blockblast.score"),
             sCardX+cardW/2, cardY+6, 0xFFB0AECF);
         ctx.centeredText(font, Component.literal(String.valueOf(score)),
@@ -545,15 +577,15 @@ public class BlockBlastScreen extends Screen {
         // ДОСКА
         // ═══════════════════════════════════════════════
         // Тень под доской
-        fillRR(ctx, bx+4, by+6, bw, bw, BOARD_RADIUS, 0x44000000);
-        // Фон доски
-        fillRR(ctx, bx, by, bw, bw, BOARD_RADIUS, 0xFF161628);
+        fillRR(ctx, bx+4, by+6, bw, bw, BOARD_RADIUS, 0x33000000);
+        // Фон доски — полупрозрачный
+        fillRR(ctx, bx, by, bw, bw, BOARD_RADIUS, 0x99161628);
 
         // Пустые клетки (тёмные ячейки сетки)
         for (int r=0; r<SIZE; r++)
             for (int c=0; c<SIZE; c++)
                 fillRR(ctx,
-                    bx+GAP+c*(cell+GAP), by+GAP+r*(cell+GAP), cell, cell, 3, 0xFF1E1E35);
+                    bx+GAP+c*(cell+GAP), by+GAP+r*(cell+GAP), cell, cell, 3, 0x7A1E1E35);
 
         // ── Анимация очистки ──
         long clearAge = now - clearAnimStart;
@@ -585,10 +617,9 @@ public class BlockBlastScreen extends Screen {
             }
         }
 
-        // ── Призрак перетаскивания ──
-        boolean overBoard = dragging!=null && !gameOver && isOverBoard(mouseX, mouseY);
+        // ── Призрак перетаскивания (позиция следует за сглаженным курсором) ──
         if (overBoard) {
-            int[] a = anchorFor(dragging, mouseX, mouseY);
+            int[] a = anchorFor(dragging, dragX, dragY);
             a = snapAnchor(dragging, a[0], a[1]);
             boolean ok = fits(dragging, a[0], a[1]);
             for (int pr=0; pr<dragging.rows(); pr++)
@@ -605,18 +636,18 @@ public class BlockBlastScreen extends Screen {
         // ═══════════════════════════════════════════════
         int trayBgY = this.height - PANEL_H + 2;
         // Тень
-        fillRR(ctx, bx+3, trayBgY+5, bw, PANEL_H-6, 10, 0x33000000);
-        // Карточка лотка
-        fillRR(ctx, bx, trayBgY, bw, PANEL_H-4, 12, 0xFF1C1C38);
+        fillRR(ctx, bx+3, trayBgY+5, bw, PANEL_H-6, 10, 0x26000000);
+        // Карточка лотка — полупрозрачная
+        fillRR(ctx, bx, trayBgY, bw, PANEL_H-4, 12, 0xA81C1C38);
 
         int slotW = bw/3;
         // Разделители
         for (int i=1; i<3; i++) {
             int lx = bx+i*slotW;
-            ctx.fill(lx, trayBgY+10, lx+1, trayBgY+PANEL_H-18, 0xFF2A2A48);
+            ctx.fill(lx, trayBgY+10, lx+1, trayBgY+PANEL_H-18, 0x592A2A48);
         }
 
-        // Фигуры в лотке
+        // Фигуры в лотке — масштаб плавно «дышит» к hover-цели
         for (int i=0; i<tray.size(); i++) {
             Piece p = tray.get(i);
             if (p.used || p==dragging) continue;
@@ -627,10 +658,10 @@ public class BlockBlastScreen extends Screen {
             if (hov) {
                 // Hover-подсветка слота
                 int hSlotX = bx+i*slotW+3;
-                fillRR(ctx, hSlotX, trayBgY+4, slotW-6, PANEL_H-12, 8, 0x1AFFFFFF);
+                fillRR(ctx, hSlotX, trayBgY+4, slotW-6, PANEL_H-12, 8, 0x14FFFFFF);
             }
 
-            float scale = hov ? 1.18f : 1.0f;
+            float scale = slotScale[i];
             int scaledTc = (int)(tc*scale);
             int offX = (tc*p.cols()-scaledTc*p.cols())/2;
             int offY = (tc*p.rows()-scaledTc*p.rows())/2;
@@ -644,20 +675,19 @@ public class BlockBlastScreen extends Screen {
         }
 
         // ═══════════════════════════════════════════════
-        // ПЕРЕТАСКИВАЕМАЯ ФИГУРА
+        // ПЕРЕТАСКИВАЕМАЯ ФИГУРА — плавное следование за курсором
         // ═══════════════════════════════════════════════
         if (dragging!=null && !gameOver) {
             long liftAge = now - dragStartTime;
             float liftT = Math.min(1f, (float)liftAge/LIFT_MS);
             liftT = 1f - (1f-liftT)*(1f-liftT)*(1f-liftT);
 
-            float baseS = trayCell();
-            float targetS = overBoard ? cellSize()*0.92f : trayCell()*1.22f;
-            float dragCell = baseS + (targetS-baseS)*liftT;
+            float dragCell = Math.max(1f, dragScale);   // уже сглажен выше
 
-            // Поднимаем над курсором
-            int px = (int)(mouseX - dragging.cols()*dragCell/2);
-            int py = (int)(mouseY - dragging.rows()*dragCell/2 - dragging.rows()*dragCell*0.12f*liftT);
+            // Позиция от сглаженного курсора; округляем один раз — клетки не «дрожат»
+            int originX = Math.round(dragX - dragging.cols()*dragCell/2);
+            int originY = Math.round(dragY - dragging.rows()*dragCell/2
+                - dragging.rows()*dragCell*0.12f*liftT);
 
             // Тень
             if (liftT>0.2f) {
@@ -668,9 +698,9 @@ public class BlockBlastScreen extends Screen {
                     for (int pc=0; pc<dragging.cols(); pc++)
                         if (dragging.cells[pr][pc])
                             fillRR(ctx,
-                                px+(int)(pc*dragCell)+sOff,
-                                py+(int)(pr*dragCell)+sOff,
-                                (int)dragCell, (int)dragCell, 3, sAlpha);
+                                originX+Math.round(pc*dragCell)+sOff,
+                                originY+Math.round(pr*dragCell)+sOff,
+                                Math.round(dragCell), Math.round(dragCell), 3, sAlpha);
             }
 
             // Сама фигура
@@ -678,15 +708,19 @@ public class BlockBlastScreen extends Screen {
                 for (int pc=0; pc<dragging.cols(); pc++)
                     if (dragging.cells[pr][pc])
                         drawBlock3D(ctx,
-                            px+(int)(pc*dragCell), py+(int)(pr*dragCell),
-                            (int)dragCell, dragging.paletteIdx);
+                            originX+Math.round(pc*dragCell),
+                            originY+Math.round(pr*dragCell),
+                            Math.round(dragCell), dragging.paletteIdx);
         }
 
         // ═══════════════════════════════════════════════
         // КОМБО-ПЛАШКА
         // ═══════════════════════════════════════════════
         if (combo>=2 && now<comboShowUntil) {
-            float fade = Math.min(1f,(float)(comboShowUntil-now)/600f);
+            // Плавное появление (150 мс) и такое же затухание (600 мс)
+            float fadeIn = Math.min(1f, (float)(now-comboShowStart)/150f);
+            float fadeOut = Math.min(1f, (float)(comboShowUntil-now)/600f);
+            float fade = Math.min(fadeIn, fadeOut);
             int alpha = (int)(0xFF*fade);
             String txt = Component.translatable("minigame.blockblast.combo", combo).getString();
             int tw = font.width(txt);
@@ -705,7 +739,7 @@ public class BlockBlastScreen extends Screen {
 
             // Центральная карточка Game Over
             int goW = bw - 20, goH = 70, goX = bx+10, goY = by+bw/2-goH/2;
-            fillRR(ctx, goX, goY, goW, goH, 12, 0xFF1C1C38);
+            fillRR(ctx, goX, goY, goW, goH, 12, 0xD91C1C38);
             fillRR(ctx, goX+8, goY, goW-16, 3, 1, 0xFFFF1744);
 
             ctx.centeredText(font, Component.translatable("minigame.blockblast.game_over"),
