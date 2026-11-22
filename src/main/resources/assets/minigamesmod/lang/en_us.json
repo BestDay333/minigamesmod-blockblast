@@ -190,5 +190,7 @@
   "minigame.chess.draw_material": "Draw — insufficient material",
   "minigame.chess.draw_repetition": "Draw — threefold repetition",
   "minigame.chess.draw_50": "Draw — 50-move rule",
-  "minigame.chess.promote": "Promote to"
+  "minigame.chess.promote": "Promote to",
+  "minigame.chess.captured": "Captured:",
+  "minigame.chess.moves": "Moves:"
 }

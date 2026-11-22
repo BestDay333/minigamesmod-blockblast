@@ -190,5 +190,7 @@
   "minigame.chess.draw_material": "Ничья — недостаточно материала",
   "minigame.chess.draw_repetition": "Ничья — троекратное повторение",
   "minigame.chess.draw_50": "Ничья — правило 50 ходов",
-  "minigame.chess.promote": "Превратить в"
+  "minigame.chess.promote": "Превратить в",
+  "minigame.chess.captured": "Взято:",
+  "minigame.chess.moves": "Ходы:"
 }

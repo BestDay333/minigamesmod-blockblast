@@ -25,22 +25,15 @@ import java.util.concurrent.CompletableFuture;
 
 public class ChessScreen extends Screen {
 
-    // --- Размеры ---
-    private static final int CELL_SIZE = 36;
-    private static final int PIECE_SIZE = 30;
-    private static final int BOARD_PX = CELL_SIZE * 8;         // 288
-    // GUI-текстуры сделаны под 160×160 (8*20), масштабируем при рендере
-    private static final int GUI_TEX_SIZE = 176;               // размер текстуры с рамкой
-    private static final int BOARD_TEX = 160;                  // размер доски в текстуре
-    private static final int BORDER = (GUI_TEX_SIZE - BOARD_TEX) / 2; // 8 пикс рамка в текстуре
-    // Реальная рамка на экране (масштабируем)
-    private static final int BORDER_PX = Math.round(BORDER * (float) BOARD_PX / BOARD_TEX); // ~14px
-    private static final int TOTAL_W = BOARD_PX + BORDER_PX * 2;
-    // Координатные метки: слева и снизу, 10px
-    private static final int COORD_SIZE = 10;
-    // Боковая панель
-    private static final int PANEL_W = 110;
-    private static final int PANEL_GAP = 10;
+    // ═══════════════════════════════════════════════════════════════
+    // Пропорциональная раскладка: ВСЁ считается от размеров экрана.
+    // Текстура gui_*.png = 176×176, внутри неё доска 160×160 (8 клеток
+    // по 20px) и рамка 8px. Мы тянем текстуру до размера 8.8*cell,
+    // тогда клетка на экране = cell, рамка = 0.4*cell, доска = 8*cell.
+    // ═══════════════════════════════════════════════════════════════
+    private static final float TEX_TO_CELL = 176f / 20f;   // 8.8 — во сколько раз текстура больше клетки
+    private static final float BORDER_FRACTION = 8f / 20f; // 0.4 — рамка относительно клетки
+    private static final int PANEL_GAP = 10;               // зазор доска↔панель
 
     private static final Identifier CLASSIC_GUI = Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "textures/minigame/chess/gui_classic.png");
     private static final Identifier WOODEN_GUI  = Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "textures/minigame/chess/gui_wooden.png");
@@ -71,6 +64,7 @@ public class ChessScreen extends Screen {
     private final ChessBot bot;
 
     private ChessColor actualPlayerColor = ChessColor.WHITE;
+    private boolean gameInitialized = false;
 
     private int selectedX = -1, selectedY = -1;
     private final List<ChessMove> currentLegalMoves = new ArrayList<>();
@@ -85,16 +79,16 @@ public class ChessScreen extends Screen {
     private int promoFromX, promoFromY, promoToX, promoToY;
 
     private boolean botThinking = false;
+    private long botStartedAt = 0;
     private volatile ChessMove pendingBotMove = null;
     private volatile long botMoveReadyTime = 0;
+    private static final long BOT_TIMEOUT_MS = 15000;
 
     private boolean gameOver = false;
     private ChessColor winner = null;
     private Component gameOverReason = null;
 
     private final List<MoveAnimation> activeAnimations = new ArrayList<>();
-
-    // История ходов в формате алгебраической нотации (упрощённой)
     private final List<String> moveNotationHistory = new ArrayList<>();
 
     public ChessScreen(Screen parent, Chess minigame) {
@@ -106,25 +100,76 @@ public class ChessScreen extends Screen {
         this.bot = new ChessBot();
     }
 
-    // ======= Вычисление позиции доски =======
+    // ═══════════════════════════════════════════════════════════════
+    // Геометрия — всё в долях экрана
+    // ═══════════════════════════════════════════════════════════════
 
-    private int boardOriginX() {
-        // Доска смещена влево от центра, чтобы дать место панели справа
-        int centerX = width / 2;
-        return centerX - TOTAL_W / 2 - (PANEL_W + PANEL_GAP) / 2;
+    /** Ширина боковой панели: ~15% ширины экрана, 90…160 px */
+    private int panelWidth() {
+        return clamp(Math.round(this.width * 0.15f), 90, 160);
     }
-    private int boardOriginY() { return (height - TOTAL_W) / 2; }
 
-    // Верхний левый угол сетки ячеек внутри рамки
-    private int innerX() { return boardOriginX() + BORDER_PX; }
-    private int innerY() { return boardOriginY() + BORDER_PX; }
+    /** Вертикальный резерв: статус сверху + подписи снизу */
+    private int verticalChrome() {
+        int statusH = 18, labelsH = 12;
+        return statusH + labelsH;
+    }
 
-    // ======= init =======
+    /** Клетка доски: из свободного места по высоте и ширине, 14…44 px */
+    private int cellSize() {
+        int margin = margin();
+        int coordW = 10; // подписи слева (цифры 8…1)
+        int availH = this.height - margin * 2 - verticalChrome();
+        int availW = this.width - margin * 2 - coordW - PANEL_GAP - panelWidth();
+        int c = (int) Math.floor(Math.min(availH, availW) / TEX_TO_CELL);
+        return clamp(c, 14, 44);
+    }
+
+    private int margin() { return Math.max(6, Math.round(this.height * 0.02f)); }
+
+    /** Размер текстуры на экране (доска+рамка): 8.8 × клетка */
+    private int texSize() { return Math.round(cellSize() * TEX_TO_CELL); }
+
+    /** Рамка доски на экране: 8px текстуры × масштаб (texSize/176) */
+    private int boardFrame() { return Math.max(2, Math.round(texSize() * 8f / 176f)); }
+
+    /** Левый верхний угол доски (вместе с рамкой) */
+    private int boardOriginX() {
+        int contentW = 10 + texSize() + PANEL_GAP + panelWidth();
+        return Math.max(2, (this.width - contentW) / 2 + 10);
+    }
+    private int boardOriginY() {
+        int statusH = 18;
+        int labelsH = 12;
+        int free = this.height - statusH - labelsH - texSize();
+        return Math.max(statusH, statusH + free / 2);
+    }
+
+    /** Левый верхний угол сетки клеток (внутри рамки) */
+    private int innerX() { return boardOriginX() + boardFrame(); }
+    private int innerY() { return boardOriginY() + boardFrame(); }
+
+    /** Размер фигуры: ~84% клетки */
+    private int pieceSize() { return Math.max(10, Math.round(cellSize() * 0.84f)); }
+
+    private static int clamp(int v, int min, int max) { return Math.max(min, Math.min(max, v)); }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Геометрия окна промоушена — единая для отрисовки и кликов
+    // ═══════════════════════════════════════════════════════════════
+    private int promoW() { return clamp(Math.round(this.width * 0.18f), 120, 170); }
+    private int promoH() { return Math.round(promoW() * 0.42f); }
+    private int promoX() { return (this.width - promoW()) / 2; }
+    private int promoY() { return (this.height - promoH()) / 2; }
+    private int promoSlot() { return clamp(Math.round(promoW() * 0.19f), 22, 30); }
+    private int promoItemX(int i) { return promoX() + 8 + i * promoSlot(); }
+    private int promoItemY() { return promoY() + Math.round(promoH() * 0.40f); }
+
+    // ═══════════════════════════════════════════════════════════════
+    // init
+    // ═══════════════════════════════════════════════════════════════
     @Override
     protected void init() {
-        int bx = boardOriginX();
-        int by = boardOriginY();
-
         Button returnButton = SpriteIconButton.builder(Component.empty(), b -> this.onClose(), true)
                 .sprite(Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "icon/return"), 15, 15)
                 .build();
@@ -143,20 +188,31 @@ public class ChessScreen extends Screen {
         addRenderableWidget(restartButton);
         addRenderableWidget(configButton);
 
-        resetGame();
+        // Новая партия только при первом открытии; при ресайзе окна партию сохраняем
+        if (!gameInitialized) {
+            gameInitialized = true;
+            resetGame();
+        }
     }
 
-    // ======= Render =======
+    // ═══════════════════════════════════════════════════════════════
+    // Render
+    // ═══════════════════════════════════════════════════════════════
     @Override
     public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         super.extractRenderState(context, mouseX, mouseY, delta);
 
-        // Применяем ход бота если готов
+        // Применяем ход бота когда готов
         if (botThinking && pendingBotMove != null && System.currentTimeMillis() >= botMoveReadyTime) {
             ChessMove move = pendingBotMove;
             pendingBotMove = null;
             botThinking = false;
             applyMove(move);
+        }
+        // Страховка: если бот завис (исключение в фоне) — отпускаем игру
+        if (botThinking && pendingBotMove == null
+                && System.currentTimeMillis() - botStartedAt > BOT_TIMEOUT_MS) {
+            botThinking = false;
         }
 
         long now = System.currentTimeMillis();
@@ -166,73 +222,75 @@ public class ChessScreen extends Screen {
         int by = boardOriginY();
         int ix = innerX();
         int iy = innerY();
+        int cell = cellSize();
+        int ps = pieceSize();
+        int tex = texSize();
 
-        // Определяем вышел ли курсор при drag
+        // Определяем вышел ли курсор за клетку при drag
         if (isDragging && !dragExitedCell) {
-            int minX = ix + dragStartX * CELL_SIZE;
-            int maxX = minX + CELL_SIZE;
-            int minY = iy + dragStartY * CELL_SIZE;
-            int maxY = minY + CELL_SIZE;
+            int minX = ix + dragStartX * cell;
+            int maxX = minX + cell;
+            int minY = iy + dragStartY * cell;
+            int maxY = minY + cell;
             if (mouseX < minX || mouseX >= maxX || mouseY < minY || mouseY >= maxY) {
                 dragExitedCell = true;
             }
         }
 
-        // --- Рисуем GUI-текстуру (доска + рамка) ---
+        // --- GUI-текстура (доска + рамка), масштаб 176 → 8.8*cell ---
         ChessRenderMode boardMode = MinigameRegistry.getConfig(ChessVisibleConfig.class).boardMode;
         Identifier guiTex = boardMode == ChessRenderMode.CLASSIC ? CLASSIC_GUI : WOODEN_GUI;
-        // Текстура 176×176 → рисуем в TOTAL_W×TOTAL_W
-        context.blit(RenderPipelines.GUI_TEXTURED, guiTex, bx, by, 0, 0, TOTAL_W, TOTAL_W, GUI_TEX_SIZE, GUI_TEX_SIZE);
+        context.blit(RenderPipelines.GUI_TEXTURED, guiTex, bx, by, 0, 0, tex, tex, 176, 176);
 
         // --- Координатные метки ---
-        drawCoordinateLabels(context, ix, iy);
+        drawCoordinateLabels(context, ix, iy, cell);
 
         boolean tracesEnabled = MinigameRegistry.getConfig(ChessVisibleConfig.class).traces;
 
         // --- Подсветка последнего хода ---
         if (tracesEnabled && lastMove != null) {
-            int fx = ix + lastMove.getFromX() * CELL_SIZE;
-            int fy = iy + lastMove.getFromY() * CELL_SIZE;
-            context.fill(fx, fy, fx + CELL_SIZE, fy + CELL_SIZE, 0x44FFE082);
-            int tx = ix + lastMove.getToX() * CELL_SIZE;
-            int ty = iy + lastMove.getToY() * CELL_SIZE;
-            context.fill(tx, ty, tx + CELL_SIZE, ty + CELL_SIZE, 0x55FFE082);
+            int fx = ix + lastMove.getFromX() * cell;
+            int fy = iy + lastMove.getFromY() * cell;
+            context.fill(fx, fy, fx + cell, fy + cell, 0x44FFE082);
+            int tx = ix + lastMove.getToX() * cell;
+            int ty = iy + lastMove.getToY() * cell;
+            context.fill(tx, ty, tx + cell, ty + cell, 0x55FFE082);
         }
 
         // --- Подсветка шаха ---
         if (!gameOver && board.isInCheck(board.getTurn())) {
             int[] kp = board.findKing(board.getTurn());
             if (kp != null) {
-                int kx = ix + kp[0] * CELL_SIZE;
-                int ky = iy + kp[1] * CELL_SIZE;
-                context.fill(kx, ky, kx + CELL_SIZE, ky + CELL_SIZE, 0x66FF0000);
+                int kx = ix + kp[0] * cell;
+                int ky = iy + kp[1] * cell;
+                context.fill(kx, ky, kx + cell, ky + cell, 0x66FF0000);
             }
         }
 
         // --- Подсветка выбранной фигуры ---
         if (selectedX >= 0 && selectedY >= 0) {
-            int sx = ix + selectedX * CELL_SIZE;
-            int sy = iy + selectedY * CELL_SIZE;
-            context.fill(sx, sy, sx + CELL_SIZE, sy + CELL_SIZE, 0x5500E5FF);
+            int sx = ix + selectedX * cell;
+            int sy = iy + selectedY * cell;
+            context.fill(sx, sy, sx + cell, sy + cell, 0x5500E5FF);
         }
 
         // --- Подсветка легальных ходов ---
         if (tracesEnabled && !currentLegalMoves.isEmpty()) {
             for (ChessMove move : currentLegalMoves) {
-                int mx = ix + move.getToX() * CELL_SIZE;
-                int my = iy + move.getToY() * CELL_SIZE;
+                int mx = ix + move.getToX() * cell;
+                int my = iy + move.getToY() * cell;
                 boolean isCapture = board.getPiece(move.getToX(), move.getToY()) != null || move.isEnPassant();
                 if (isCapture) {
-                    // красное кольцо по углам ячейки
-                    context.fill(mx, my, mx + CELL_SIZE, my + CELL_SIZE, 0x44FF5252);
-                    context.fill(mx + 2, my + 2, mx + CELL_SIZE - 2, my + CELL_SIZE - 2, 0x00000000);
-                    // заполним снова только углы
-                    context.fill(mx, my, mx + CELL_SIZE, my + CELL_SIZE, 0x44FF5252);
+                    // рамка-кольцо вокруг ячейки
+                    context.fill(mx, my, mx + cell, my + 2, 0x66FF5252);
+                    context.fill(mx, my + cell - 2, mx + cell, my + cell, 0x66FF5252);
+                    context.fill(mx, my, mx + 2, my + cell, 0x66FF5252);
+                    context.fill(mx + cell - 2, my, mx + cell, my + cell, 0x66FF5252);
                 } else {
                     // точка в центре
-                    int dotR = 5;
-                    int cx2 = mx + CELL_SIZE / 2;
-                    int cy2 = my + CELL_SIZE / 2;
+                    int dotR = Math.max(3, cell / 7);
+                    int cx2 = mx + cell / 2;
+                    int cy2 = my + cell / 2;
                     context.fill(cx2 - dotR, cy2 - dotR, cx2 + dotR, cy2 + dotR, 0x5500E5FF);
                 }
             }
@@ -246,10 +304,10 @@ public class ChessScreen extends Screen {
                 if (isAnimatingTarget(x, y)) continue;
                 ChessPiece piece = board.getPiece(x, y);
                 if (piece != null) {
-                    int px = ix + x * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-                    int py = iy + y * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-                    Identifier tex = ChessTextures.getPieceTexture(piece.getType(), piece.getColor(), piecesMode);
-                    context.blit(RenderPipelines.GUI_TEXTURED, tex, px, py, 0, 0, PIECE_SIZE, PIECE_SIZE, 16, 16);
+                    int px = ix + x * cell + (cell - ps) / 2;
+                    int py = iy + y * cell + (cell - ps) / 2;
+                    Identifier texP = ChessTextures.getPieceTexture(piece.getType(), piece.getColor(), piecesMode);
+                    context.blit(RenderPipelines.GUI_TEXTURED, texP, px, py, 0, 0, ps, ps, 16, 16);
                 }
             }
         }
@@ -260,49 +318,49 @@ public class ChessScreen extends Screen {
             float smoothT = t * t * (3f - 2f * t);
             int curX = Math.round(anim.fromPixelX + (anim.toPixelX - anim.fromPixelX) * smoothT);
             int curY = Math.round(anim.fromPixelY + (anim.toPixelY - anim.fromPixelY) * smoothT);
-            Identifier tex = ChessTextures.getPieceTexture(anim.piece.getType(), anim.piece.getColor(), piecesMode);
-            context.blit(RenderPipelines.GUI_TEXTURED, tex, curX, curY, 0, 0, PIECE_SIZE, PIECE_SIZE, 16, 16);
+            Identifier texA = ChessTextures.getPieceTexture(anim.piece.getType(), anim.piece.getColor(), piecesMode);
+            context.blit(RenderPipelines.GUI_TEXTURED, texA, curX, curY, 0, 0, ps, ps, 16, 16);
         }
 
         // --- Перетаскиваемая фигура ---
         if (isDragging && dragExitedCell && draggedPiece != null) {
             Identifier dragTex = ChessTextures.getPieceTexture(draggedPiece.getType(), draggedPiece.getColor(), piecesMode);
             context.blit(RenderPipelines.GUI_TEXTURED, dragTex,
-                    mouseX - PIECE_SIZE / 2, mouseY - PIECE_SIZE / 2,
-                    0, 0, PIECE_SIZE, PIECE_SIZE, 16, 16);
+                    mouseX - ps / 2, mouseY - ps / 2,
+                    0, 0, ps, ps, 16, 16);
         }
 
         // --- Статус-текст над доской ---
-        drawStatusText(context, bx, by);
+        drawStatusText(context, bx, by, tex);
 
         // --- Боковая панель ---
-        drawSidePanel(context, bx, by, piecesMode, mouseX, mouseY);
+        drawSidePanel(context, bx, by, piecesMode);
 
         // --- Окно промоушена ---
         if (pendingPromotion) {
-            drawPromotionPanel(context, mouseX, mouseY, piecesMode, bx, by);
+            drawPromotionPanel(context, mouseX, mouseY, piecesMode);
         }
     }
 
-    private void drawCoordinateLabels(GuiGraphicsExtractor context, int ix, int iy) {
+    private void drawCoordinateLabels(GuiGraphicsExtractor context, int ix, int iy, int cell) {
         // Буквы a-h снизу
         char[] files = {'a','b','c','d','e','f','g','h'};
         for (int x = 0; x < 8; x++) {
             String label = String.valueOf(files[x]);
-            int lx = ix + x * CELL_SIZE + CELL_SIZE / 2 - font.width(label) / 2;
-            int ly = iy + BOARD_PX + 3;
+            int lx = ix + x * cell + cell / 2 - font.width(label) / 2;
+            int ly = iy + 8 * cell + 3;
             context.text(font, Component.literal(label), lx, ly, 0xFFBBBBBB, false);
         }
-        // Цифры 8-1 слева (8 вверху, 1 внизу)
+        // Цифры 8-1 слева
         for (int y = 0; y < 8; y++) {
             String label = String.valueOf(8 - y);
             int lx = ix - font.width(label) - 3;
-            int ly = iy + y * CELL_SIZE + CELL_SIZE / 2 - font.lineHeight / 2;
+            int ly = iy + y * cell + cell / 2 - font.lineHeight / 2;
             context.text(font, Component.literal(label), lx, ly, 0xFFBBBBBB, false);
         }
     }
 
-    private void drawStatusText(GuiGraphicsExtractor context, int bx, int by) {
+    private void drawStatusText(GuiGraphicsExtractor context, int bx, int by, int tex) {
         Component statusText;
         int statusColor;
         if (gameOver) {
@@ -330,76 +388,80 @@ public class ChessScreen extends Screen {
             statusColor = 0xFFCCCCCC;
         }
         int tw = font.width(statusText);
-        int textX = bx + TOTAL_W / 2 - tw / 2;
-        int textY = by - 14;
+        int textX = bx + tex / 2 - tw / 2;
+        int textY = Math.max(1, by - 15);
         context.text(font, statusText, textX, textY, statusColor, true);
     }
 
-    private void drawSidePanel(GuiGraphicsExtractor context, int bx, int by,
-                               ChessRenderMode piecesMode, int mouseX, int mouseY) {
-        int px = bx + TOTAL_W + PANEL_GAP;
+    private void drawSidePanel(GuiGraphicsExtractor context, int bx, int by, ChessRenderMode piecesMode) {
+        int pw = panelWidth();
+        int tex = texSize();
+        int cell = cellSize();
+        int px = bx + tex + PANEL_GAP;
         int py = by;
-        int ph = TOTAL_W;
+        int ph = tex;
 
         // Фон панели
-        context.fill(px, py, px + PANEL_W, py + ph, 0xCC111111);
-        context.fill(px, py, px + PANEL_W, py + 1, 0xFF555555);
-        context.fill(px, py + ph - 1, px + PANEL_W, py + ph, 0xFF555555);
+        context.fill(px, py, px + pw, py + ph, 0xCC111111);
+        context.fill(px, py, px + pw, py + 1, 0xFF555555);
+        context.fill(px, py + ph - 1, px + pw, py + ph, 0xFF555555);
         context.fill(px, py, px + 1, py + ph, 0xFF555555);
-        context.fill(px + PANEL_W - 1, py, px + PANEL_W, py + ph, 0xFF555555);
+        context.fill(px + pw - 1, py, px + pw, py + ph, 0xFF555555);
 
-        int cy = py + 8;
+        int pad = Math.max(4, pw / 16);
+        int cy = py + pad;
 
         // === Счётчик ходов ===
         int moveNum = board.getFullMoveNumber();
         ChessBotMode botMode = MinigameRegistry.getConfig(ChessVisibleConfig.class).botMode;
         String botLabel = "Bot: " + botMode.name().charAt(0) + botMode.name().substring(1).toLowerCase();
-        Component moveComp = Component.literal("Move " + moveNum + "   " + botLabel);
-        context.text(font, moveComp, px + 6, cy, 0xFFAAAAAA, false);
-        cy += font.lineHeight + 6;
+        Component moveComp = Component.literal("Move " + moveNum + "  " + botLabel);
+        // Влезает ли строка в панель — при узком экране укорачиваем
+        if (font.width(moveComp) > pw - pad * 2) {
+            moveComp = Component.literal("M" + moveNum + " " + botMode.name().charAt(0));
+        }
+        context.text(font, moveComp, px + pad, cy, 0xFFAAAAAA, false);
+        cy += font.lineHeight + 4;
 
-        // === Взятые фигуры игрока (белые взяли что-то = чёрные фигуры захвачены) ===
-        // Показываем взятые белыми (capturedBlack) и взятые чёрными (capturedWhite)
+        // === Захваченные фигуры ===
         List<ChessPiece> capturedByWhite = board.getCapturedBlackPieces();
         List<ChessPiece> capturedByBlack = board.getCapturedWhitePieces();
-
-        // Преимущество в материале
         int whiteAdv = computeMaterialAdvantage(capturedByWhite, capturedByBlack);
 
-        // --- Захваченные ЧЁРНЫМи (наверху — сторона бота если игрок белый) ---
-        context.text(font, Component.literal("Captured:"), px + 6, cy, 0xFF888888, false);
+        int mini = clamp(cell / 3, 9, 14);
+
+        // Захваченные ЧЁРНЫМи (наверху — сторона бота, если игрок белый)
+        context.text(font, Component.translatable("minigame.chess.captured"), px + pad, cy, 0xFF888888, false);
         cy += font.lineHeight + 2;
-        cy = drawCapturedPieces(context, capturedByBlack, px + 6, cy, piecesMode);
+        cy = drawCapturedPieces(context, capturedByBlack, px + pad, cy, pw, mini, piecesMode);
         if (whiteAdv < 0) {
-            context.text(font, Component.literal("+" + (-whiteAdv)), px + 6, cy, 0xFF55FF55, false);
+            context.text(font, Component.literal("+" + (-whiteAdv)), px + pad, cy, 0xFF55FF55, false);
         }
-        cy += font.lineHeight + 4;
-
-        // Разделитель
-        context.fill(px + 4, cy, px + PANEL_W - 4, cy + 1, 0xFF444444);
-        cy += 5;
-
-        // --- Захваченные БЕЛЫМи ---
-        context.text(font, Component.literal("Captured:"), px + 6, cy, 0xFF888888, false);
         cy += font.lineHeight + 2;
-        cy = drawCapturedPieces(context, capturedByWhite, px + 6, cy, piecesMode);
-        if (whiteAdv > 0) {
-            context.text(font, Component.literal("+" + whiteAdv), px + 6, cy, 0xFF55FF55, false);
-        }
-        cy += font.lineHeight + 4;
 
         // Разделитель
-        context.fill(px + 4, cy, px + PANEL_W - 4, cy + 1, 0xFF444444);
-        cy += 8;
+        context.fill(px + pad / 2, cy, px + pw - pad / 2, cy + 1, 0xFF444444);
+        cy += 4;
+
+        // Захваченные БЕЛЫми
+        context.text(font, Component.translatable("minigame.chess.captured"), px + pad, cy, 0xFF888888, false);
+        cy += font.lineHeight + 2;
+        cy = drawCapturedPieces(context, capturedByWhite, px + pad, cy, pw, mini, piecesMode);
+        if (whiteAdv > 0) {
+            context.text(font, Component.literal("+" + whiteAdv), px + pad, cy, 0xFF55FF55, false);
+        }
+        cy += font.lineHeight + 2;
+
+        // Разделитель
+        context.fill(px + pad / 2, cy, px + pw - pad / 2, cy + 1, 0xFF444444);
+        cy += 6;
 
         // === История ходов ===
-        context.text(font, Component.literal("Moves:"), px + 6, cy, 0xFF888888, false);
+        context.text(font, Component.translatable("minigame.chess.moves"), px + pad, cy, 0xFF888888, false);
         cy += font.lineHeight + 3;
 
-        // Показываем последние ходы (пары: белый/чёрный)
-        int maxMoveLines = (py + ph - cy - 10) / (font.lineHeight + 1);
+        int maxMoveLines = Math.max(1, (py + ph - cy - pad) / (font.lineHeight + 1));
         int startIdx = Math.max(0, moveNotationHistory.size() - maxMoveLines * 2);
-        // Выравниваем до начала пары
         if (startIdx % 2 == 1) startIdx--;
 
         for (int i = startIdx; i < moveNotationHistory.size(); i += 2) {
@@ -407,11 +469,10 @@ public class ChessScreen extends Screen {
             String whiteMove = moveNotationHistory.get(i);
             String blackMove = (i + 1 < moveNotationHistory.size()) ? moveNotationHistory.get(i + 1) : "";
             String line = pairNum + ". " + whiteMove + (blackMove.isEmpty() ? "" : "  " + blackMove);
-            // Последняя пара — ярче
             int col = (i >= moveNotationHistory.size() - 2) ? 0xFFFFFFFF : 0xFF888888;
-            context.text(font, Component.literal(line), px + 6, cy, col, false);
+            context.text(font, Component.literal(line), px + pad, cy, col, false);
             cy += font.lineHeight + 1;
-            if (cy > py + ph - 10) break;
+            if (cy > py + ph - pad) break;
         }
     }
 
@@ -423,57 +484,55 @@ public class ChessScreen extends Screen {
         return white - black;
     }
 
-    /** Рисует взятые фигуры миниатюрами 12×12, возвращает новый y */
+    /** Рисует взятые фигуры миниатюрами, возвращает новый y */
     private int drawCapturedPieces(GuiGraphicsExtractor context, List<ChessPiece> pieces,
-                                   int startX, int startY, ChessRenderMode piecesMode) {
+                                   int startX, int startY, int panelW, int mini, ChessRenderMode piecesMode) {
         if (pieces.isEmpty()) return startY;
-        int miniSize = 12;
         int gap = 1;
-        int perRow = (PANEL_W - 12) / (miniSize + gap);
+        int perRow = Math.max(1, (panelW - 12) / (mini + gap));
         int x = startX;
         int y = startY;
         int count = 0;
         for (ChessPiece p : pieces) {
             if (count > 0 && count % perRow == 0) {
-                y += miniSize + gap;
+                y += mini + gap;
                 x = startX;
             }
             Identifier tex = ChessTextures.getPieceTexture(p.getType(), p.getColor(), piecesMode);
-            context.blit(RenderPipelines.GUI_TEXTURED, tex, x, y, 0, 0, miniSize, miniSize, 16, 16);
-            x += miniSize + gap;
+            context.blit(RenderPipelines.GUI_TEXTURED, tex, x, y, 0, 0, mini, mini, 16, 16);
+            x += mini + gap;
             count++;
         }
-        int rows = (count == 0) ? 0 : (count - 1) / perRow + 1;
-        return startY + rows * (miniSize + gap) + 2;
+        int rows = (count - 1) / perRow + 1;
+        return startY + rows * (mini + gap) + 2;
     }
 
     private void drawPromotionPanel(GuiGraphicsExtractor context, int mouseX, int mouseY,
-                                    ChessRenderMode piecesMode, int bx, int by) {
-        context.fill(bx, by, bx + TOTAL_W, by + TOTAL_W, 0x99000000);
-        int pw = 130;
-        int ph = 52;
-        int ppx = (width - pw) / 2;
-        int ppy = (height - ph) / 2;
+                                    ChessRenderMode piecesMode) {
+        int bx = boardOriginX(), by = boardOriginY(), tex = texSize();
+        context.fill(bx, by, bx + tex, by + tex, 0x99000000);
+        int pw = promoW(), ph = promoH();
+        int ppx = promoX(), ppy = promoY();
         context.fill(ppx, ppy, ppx + pw, ppy + ph, 0xEE2A2A2A);
-        context.fill(ppx,          ppy,      ppx + pw,     ppy + 1,  0xFFFFFFFF);
-        context.fill(ppx,          ppy + ph - 1, ppx + pw, ppy + ph, 0xFFFFFFFF);
-        context.fill(ppx,          ppy,      ppx + 1,      ppy + ph, 0xFFFFFFFF);
-        context.fill(ppx + pw - 1, ppy,      ppx + pw,     ppy + ph, 0xFFFFFFFF);
+        context.fill(ppx,          ppy,        ppx + pw,   ppy + 1,   0xFFFFFFFF);
+        context.fill(ppx,          ppy + ph-1, ppx + pw,   ppy + ph,  0xFFFFFFFF);
+        context.fill(ppx,          ppy,        ppx + 1,    ppy + ph,  0xFFFFFFFF);
+        context.fill(ppx + pw - 1, ppy,        ppx + pw,   ppy + ph,  0xFFFFFFFF);
 
         Component promoTitle = Component.translatable("minigame.chess.promote");
         context.text(font, promoTitle, ppx + pw / 2 - font.width(promoTitle) / 2, ppy + 5, 0xFFFFFFFF, false);
 
         ChessPieceType[] promoTypes = {ChessPieceType.QUEEN, ChessPieceType.ROOK, ChessPieceType.BISHOP, ChessPieceType.KNIGHT};
-        int pieceSlot = 26;
+        int slot = promoSlot();
+        int ps = slot - 6;
         for (int i = 0; i < 4; i++) {
-            int itemX = ppx + 7 + i * pieceSlot;
-            int itemY = ppy + 20;
-            if (mouseX >= itemX && mouseX < itemX + pieceSlot - 2 && mouseY >= itemY && mouseY < itemY + pieceSlot - 2) {
-                context.fill(itemX, itemY, itemX + pieceSlot - 2, itemY + pieceSlot - 2, 0x55FFFFFF);
+            int itemX = promoItemX(i);
+            int itemY = promoItemY();
+            if (mouseX >= itemX && mouseX < itemX + slot - 2 && mouseY >= itemY && mouseY < itemY + slot - 2) {
+                context.fill(itemX, itemY, itemX + slot - 2, itemY + slot - 2, 0x55FFFFFF);
             }
             Identifier pTex = ChessTextures.getPieceTexture(promoTypes[i], actualPlayerColor, piecesMode);
-            int ps = 20;
-            context.blit(RenderPipelines.GUI_TEXTURED, pTex, itemX + (pieceSlot - 2 - ps) / 2, itemY + 2, 0, 0, ps, ps, 16, 16);
+            context.blit(RenderPipelines.GUI_TEXTURED, pTex, itemX + (slot - 2 - ps) / 2, itemY + 2, 0, 0, ps, ps, 16, 16);
         }
     }
 
@@ -484,7 +543,9 @@ public class ChessScreen extends Screen {
         return false;
     }
 
-    // ======= Ввод мыши =======
+    // ═══════════════════════════════════════════════════════════════
+    // Ввод мыши
+    // ═══════════════════════════════════════════════════════════════
     @Override
     public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
         double mouseX = click.x();
@@ -492,16 +553,12 @@ public class ChessScreen extends Screen {
         if (click.button() != 0) return super.mouseClicked(click, doubled);
 
         if (pendingPromotion) {
-            int pw = 130;
-            int ph = 52;
-            int ppx = (width - pw) / 2;
-            int ppy = (height - ph) / 2;
             ChessPieceType[] promoTypes = {ChessPieceType.QUEEN, ChessPieceType.ROOK, ChessPieceType.BISHOP, ChessPieceType.KNIGHT};
-            int pieceSlot = 26;
+            int slot = promoSlot();
             for (int i = 0; i < 4; i++) {
-                int itemX = ppx + 7 + i * pieceSlot;
-                int itemY = ppy + 20;
-                if (mouseX >= itemX && mouseX < itemX + pieceSlot - 2 && mouseY >= itemY && mouseY < itemY + pieceSlot - 2) {
+                int itemX = promoItemX(i);
+                int itemY = promoItemY();
+                if (mouseX >= itemX && mouseX < itemX + slot - 2 && mouseY >= itemY && mouseY < itemY + slot - 2) {
                     completePromotion(promoTypes[i]);
                     return true;
                 }
@@ -513,8 +570,9 @@ public class ChessScreen extends Screen {
 
         int ix = innerX();
         int iy = innerY();
-        int cellX = (int) Math.floor((mouseX - ix) / (double) CELL_SIZE);
-        int cellY = (int) Math.floor((mouseY - iy) / (double) CELL_SIZE);
+        int cell = cellSize();
+        int cellX = (int) Math.floor((mouseX - ix) / (double) cell);
+        int cellY = (int) Math.floor((mouseY - iy) / (double) cell);
 
         if (cellX >= 0 && cellX < 8 && cellY >= 0 && cellY < 8) {
             if (selectedX >= 0 && selectedY >= 0) {
@@ -564,8 +622,9 @@ public class ChessScreen extends Screen {
             if (wasExited) {
                 int ix = innerX();
                 int iy = innerY();
-                int cellX = (int) Math.floor((mouseX - ix) / (double) CELL_SIZE);
-                int cellY = (int) Math.floor((mouseY - iy) / (double) CELL_SIZE);
+                int cell = cellSize();
+                int cellX = (int) Math.floor((mouseX - ix) / (double) cell);
+                int cellY = (int) Math.floor((mouseY - iy) / (double) cell);
                 if (cellX >= 0 && cellX < 8 && cellY >= 0 && cellY < 8) {
                     if (cellX != startX || cellY != startY) {
                         ChessMove move = findLegalMove(startX, startY, cellX, cellY);
@@ -576,8 +635,9 @@ public class ChessScreen extends Screen {
                                 promoToX = cellX; promoToY = cellY;
                                 return true;
                             }
-                            int releasePx = (int) Math.round(mouseX - PIECE_SIZE / 2.0);
-                            int releasePy = (int) Math.round(mouseY - PIECE_SIZE / 2.0);
+                            int ps = pieceSize();
+                            int releasePx = (int) Math.round(mouseX - ps / 2.0);
+                            int releasePy = (int) Math.round(mouseY - ps / 2.0);
                             executePlayerMove(move, true, releasePx, releasePy);
                             return true;
                         }
@@ -605,7 +665,9 @@ public class ChessScreen extends Screen {
         return super.keyPressed(input);
     }
 
-    // ======= Логика игры =======
+    // ═══════════════════════════════════════════════════════════════
+    // Логика игры
+    // ═══════════════════════════════════════════════════════════════
 
     private void selectPiece(int x, int y) {
         selectedX = x; selectedY = y;
@@ -670,15 +732,22 @@ public class ChessScreen extends Screen {
 
     private void triggerBotMove() {
         botThinking = true;
+        botStartedAt = System.currentTimeMillis();
         long startTime = System.currentTimeMillis();
         ChessBoard boardCopy = board.copy();
         ChessBotMode mode = MinigameRegistry.getConfig(ChessVisibleConfig.class).botMode;
-        CompletableFuture.supplyAsync(() -> bot.findBestMove(boardCopy, mode)).thenAccept(bestMove -> {
-            long elapsed = System.currentTimeMillis() - startTime;
-            long delay = Math.max(0, 350 - elapsed);
-            botMoveReadyTime = System.currentTimeMillis() + delay;
-            pendingBotMove = bestMove;
-        });
+        CompletableFuture
+                .supplyAsync(() -> bot.findBestMove(boardCopy, mode))
+                .thenAccept(bestMove -> {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    long delay = Math.max(0, 350 - elapsed);
+                    botMoveReadyTime = System.currentTimeMillis() + delay;
+                    pendingBotMove = bestMove;
+                })
+                .exceptionally(ex -> {
+                    pendingBotMove = null;
+                    return null;
+                });
     }
 
     private void applyMove(ChessMove move) { applyMove(move, false, 0, 0); }
@@ -686,6 +755,8 @@ public class ChessScreen extends Screen {
     private void applyMove(ChessMove move, boolean fromDrag, int dragReleasePx, int dragReleasePy) {
         int ix = innerX();
         int iy = innerY();
+        int cell = cellSize();
+        int ps = pieceSize();
 
         boolean isCapture = move.isEnPassant() || board.getPiece(move.getToX(), move.getToY()) != null;
 
@@ -698,10 +769,10 @@ public class ChessScreen extends Screen {
 
         // Анимация
         ChessPiece movedPiece = board.getPiece(move.getToX(), move.getToY());
-        int toPx = ix + move.getToX() * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-        int toPy = iy + move.getToY() * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-        int fromPx = fromDrag ? dragReleasePx : (ix + move.getFromX() * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2);
-        int fromPy = fromDrag ? dragReleasePy : (iy + move.getFromY() * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2);
+        int toPx = ix + move.getToX() * cell + (cell - ps) / 2;
+        int toPy = iy + move.getToY() * cell + (cell - ps) / 2;
+        int fromPx = fromDrag ? dragReleasePx : (ix + move.getFromX() * cell + (cell - ps) / 2);
+        int fromPy = fromDrag ? dragReleasePy : (iy + move.getFromY() * cell + (cell - ps) / 2);
         long duration = fromDrag ? 80 : 180;
         activeAnimations.add(new MoveAnimation(movedPiece, fromPx, fromPy, toPx, toPy, move.getToX(), move.getToY(), duration));
 
@@ -709,17 +780,17 @@ public class ChessScreen extends Screen {
             if (move.getToX() == 6) {
                 ChessPiece rook = board.getPiece(5, move.getToY());
                 if (rook != null) {
-                    int rFrom = ix + 7 * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-                    int rTo   = ix + 5 * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-                    int rY    = iy + move.getToY() * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
+                    int rFrom = ix + 7 * cell + (cell - ps) / 2;
+                    int rTo   = ix + 5 * cell + (cell - ps) / 2;
+                    int rY    = iy + move.getToY() * cell + (cell - ps) / 2;
                     activeAnimations.add(new MoveAnimation(rook, rFrom, rY, rTo, rY, 5, move.getToY(), 180));
                 }
             } else if (move.getToX() == 2) {
                 ChessPiece rook = board.getPiece(3, move.getToY());
                 if (rook != null) {
-                    int rFrom = ix + 0 * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-                    int rTo   = ix + 3 * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
-                    int rY    = iy + move.getToY() * CELL_SIZE + (CELL_SIZE - PIECE_SIZE) / 2;
+                    int rFrom = ix + 0 * cell + (cell - ps) / 2;
+                    int rTo   = ix + 3 * cell + (cell - ps) / 2;
+                    int rY    = iy + move.getToY() * cell + (cell - ps) / 2;
                     activeAnimations.add(new MoveAnimation(rook, rFrom, rY, rTo, rY, 3, move.getToY(), 180));
                 }
             }
