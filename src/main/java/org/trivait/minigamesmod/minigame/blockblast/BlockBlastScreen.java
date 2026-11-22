@@ -530,10 +530,13 @@ public class BlockBlastScreen extends Screen {
 
         boolean overBoard = dragging!=null && !gameOver && isOverBoard(mouseX, mouseY);
         if (dragging!=null) {
-            dragX += (mouseX-dragX)*k;
-            dragY += (mouseY-dragY)*k;
+            // Позиция — ровно за курсором, без задержки
+            dragX = mouseX;
+            dragY = mouseY;
+            // Сглажен только масштаб (быстрый, ~25 мс)
             float targetS = overBoard ? cellSize()*0.92f : trayCell()*1.22f;
-            dragScale += (targetS-dragScale)*k;
+            float ks = 1f - (float)Math.exp(-dt / 25f);
+            dragScale += (targetS-dragScale)*ks;
         } else {
             dragX = mouseX; dragY = mouseY;
         }
