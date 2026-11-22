@@ -27,16 +27,13 @@ public class ChessScreen extends Screen {
 
     // ═══════════════════════════════════════════════════════════════
     // Пропорциональная раскладка: ВСЁ считается от размеров экрана.
-    // Текстура gui_*.png = 176×176, внутри неё доска 160×160 (8 клеток
-    // по 20px) и рамка 8px. Мы тянем текстуру до размера 8.8*cell,
-    // тогда клетка на экране = cell, рамка = 0.4*cell, доска = 8*cell.
+    // Доска рисуется вручную (context.fill) — клетки гарантированно
+    // совпадают с кликами, без погрешностей масштабирования текстуры.
+    // Клетка на экране = cell, рамка = 0.4*cell, весь блок = 8.8*cell.
     // ═══════════════════════════════════════════════════════════════
-    private static final float TEX_TO_CELL = 176f / 20f;   // 8.8 — во сколько раз текстура больше клетки
-    private static final float BORDER_FRACTION = 8f / 20f; // 0.4 — рамка относительно клетки
+    private static final float TEX_TO_CELL = 8.8f;         // блок доски = 8 клеток + 2 рамки по 0.4
+    private static final float BORDER_FRACTION = 0.4f;     // рамка относительно клетки
     private static final int PANEL_GAP = 10;               // зазор доска↔панель
-
-    private static final Identifier CLASSIC_GUI = Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "textures/minigame/chess/gui_classic.png");
-    private static final Identifier WOODEN_GUI  = Identifier.fromNamespaceAndPath(MinigamesMod.MOD_ID, "textures/minigame/chess/gui_wooden.png");
 
     // --- Анимация хода ---
     private static class MoveAnimation {
@@ -127,11 +124,11 @@ public class ChessScreen extends Screen {
 
     private int margin() { return Math.max(6, Math.round(this.height * 0.02f)); }
 
-    /** Размер текстуры на экране (доска+рамка): 8.8 × клетка */
-    private int texSize() { return Math.round(cellSize() * TEX_TO_CELL); }
+    /** Весь блок доски (клетки + 2 рамки): 8.8 × клетка */
+    private int texSize() { return cellSize() * 8 + boardFrame() * 2; }
 
-    /** Рамка доски на экране: 8px текстуры × масштаб (texSize/176) */
-    private int boardFrame() { return Math.max(2, Math.round(texSize() * 8f / 176f)); }
+    /** Рамка доски: 0.4 × клетка */
+    private int boardFrame() { return Math.max(2, Math.round(cellSize() * BORDER_FRACTION)); }
 
     /** Левый верхний угол доски (вместе с рамкой) */
     private int boardOriginX() {
@@ -237,10 +234,24 @@ public class ChessScreen extends Screen {
             }
         }
 
-        // --- GUI-текстура (доска + рамка), масштаб 176 → 8.8*cell ---
+        // --- Доска рисуется вручную — клетки идеально совпадают с кликами ---
         ChessRenderMode boardMode = MinigameRegistry.getConfig(ChessVisibleConfig.class).boardMode;
-        Identifier guiTex = boardMode == ChessRenderMode.CLASSIC ? CLASSIC_GUI : WOODEN_GUI;
-        context.blit(RenderPipelines.GUI_TEXTURED, guiTex, bx, by, 0, 0, tex, tex, 176, 176);
+        boolean wooden = boardMode == ChessRenderMode.WOODEN;
+        int frameOuter = wooden ? 0xFF6B4A2A : 0xFF2B2926;
+        int frameInner = wooden ? 0xFF8A6234 : 0xFF4A4742;
+        int lightSq    = wooden ? 0xFFF0D9B5 : 0xFFEEEED2;
+        int darkSq     = wooden ? 0xFFB58863 : 0xFF769656;
+        int f = boardFrame();
+        // внешняя рамка и внутренняя окантовка
+        context.fill(bx, by, bx + tex, by + tex, frameOuter);
+        context.fill(bx + f - 1, by + f - 1, bx + tex - f + 1, by + tex - f + 1, frameInner);
+        // клетки (a8 — светлая)
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                int sq = ((x + y) % 2 == 0) ? lightSq : darkSq;
+                context.fill(ix + x * cell, iy + y * cell, ix + (x + 1) * cell, iy + (y + 1) * cell, sq);
+            }
+        }
 
         // --- Координатные метки ---
         drawCoordinateLabels(context, ix, iy, cell);
