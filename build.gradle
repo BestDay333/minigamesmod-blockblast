@@ -11,6 +11,9 @@ version = project.mod_version
 group = project.maven_group
 
 repositories {
+	maven { url '/home/z/my-project/work/local-maven' }
+	maven { url 'https://maven.aliyun.com/repository/public' }
+	maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
 	mavenCentral()
 	maven {
 		url "https://api.modrinth.com/maven"
