@@ -14,6 +14,7 @@ import org.trivait.minigamesmod.api.MinigameRegistry;
 import org.trivait.minigamesmod.config.Config;
 import org.trivait.minigamesmod.config.MinigameLayoutConfig;
 import org.trivait.minigamesmod.leaderboard.SheetsApi;
+import org.trivait.minigamesmod.minigame.blockblast.BlockBlast;
 import org.trivait.minigamesmod.minigame.bubbleshooter.BubbleShooter;
 import org.trivait.minigamesmod.minigame.cookieclicker.CookieClicker;
 import org.trivait.minigamesmod.minigame.game2048.Game2048;
@@ -49,6 +50,7 @@ public class MinigamesMod implements ClientModInitializer {
         MinigameRegistry.register(new BubbleShooter());
         MinigameRegistry.register(new CookieClicker());
         MinigameRegistry.register(new Solitaire());
+        MinigameRegistry.register(new BlockBlast());
 
         FabricLoader.getInstance().getModContainer("minigamesmod").ifPresent(s ->
                 ResourceManagerHelper.registerBuiltinResourcePack(Identifier.of("minigamesmod", "minigames"),

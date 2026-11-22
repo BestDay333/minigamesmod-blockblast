@@ -6,10 +6,8 @@
   "text.autoconfig.minigames.option.mainMenuButtonPosition": "Позиция на главном экране",
   "text.autoconfig.minigames.option.pauseMenuButton": "Кнопка в меню паузы",
   "text.autoconfig.minigames.option.pauseMenuButtonPosition": "Позиция в меню паузы",
-
   "config.minigames.category.general": "Основное",
   "config.minigames.category.minigames": "Мини-игры",
-
   "config.minigames.main_menu_button_position.left_singleplayer": "Слева: Одиночная игра",
   "config.minigames.main_menu_button_position.left_multiplayer": "Слева: Сетевая игра",
   "config.minigames.main_menu_button_position.left_realms": "Слева: Realms",
@@ -19,7 +17,6 @@
   "config.minigames.main_menu_button_position.right_realms": "Справа: Realms",
   "config.minigames.main_menu_button_position.right_mods": "Справа: Моды",
   "config.minigames.main_menu_button_position.icon_button": "Ряд кнопок-иконок",
-
   "config.minigames.pause_menu_button_position.left_same_row": "Слева: 1 ряд",
   "config.minigames.pause_menu_button_position.left_next_row": "Слева: 2 ряд",
   "config.minigames.pause_menu_button_position.left_2_rows_down": "Слева: 3 ряд",
@@ -31,22 +28,18 @@
   "config.minigames.pause_menu_button_position.right_3_rows_down": "Справа: 4 ряд",
   "config.minigames.pause_menu_button_position.right_4_rows_down": "Справа: 5 ряд",
   "config.minigames.pause_menu_button_position.icon_button": "Ряд кнопок-иконок",
-
   "text.autoconfig.minigames/2048_ui.title": "Настройки 2048",
   "text.autoconfig.minigames/2048_ui.option.gridSize": "Размер поля",
   "text.autoconfig.minigames/2048_ui.option.volume": "Громкость",
-
   "text.autoconfig.minigames/tetris_ui.title": "Настройки Тетриса",
   "text.autoconfig.minigames/tetris_ui.option.hardDrop": "Хард-дроп",
   "text.autoconfig.minigames/tetris_ui.option.volume": "Громкость",
   "text.autoconfig.minigames/tetris_ui.option.randomBlocks": "Рандомные текстуры блоков",
-
   "text.autoconfig.minigames/dino_ui.title": "Настрйоки дино",
   "text.autoconfig.minigames/dino_ui.option.volume": "Громкость",
   "text.autoconfig.minigames/snake_ui.title": "Настройки змейки",
   "text.autoconfig.minigames/snake_ui.option.volume": "Громкость",
   "text.autoconfig.minigames/snake_ui.option.randomFood": "Рандомная еда",
-
   "text.autoconfig.minigames/minesweeper.title": "Настройки сапёра",
   "text.autoconfig.minigames/minesweeper.option.soundsVolume": "Громкость",
   "text.autoconfig.minigames/minesweeper.option.gridWidth": "Ширина поля",
@@ -54,25 +47,20 @@
   "text.autoconfig.minigames/minesweeper.option.mines": "Количество мин",
   "text.autoconfig.minigames/minesweeper.option.enableAnimations": "Анимации включены",
   "text.autoconfig.minigames/minesweeper.option.enableExplosionAnimation": "Анимации взрыва при поражении включены",
-
   "text.autoconfig.minigames/sudoku_ui.title": "Настройки судоку",
   "text.autoconfig.minigames/sudoku_ui.option.volume": "Громкость",
   "text.autoconfig.minigames/sudoku_ui.option.difficulty": "Сложность",
-
   "text.autoconfig.minigames/bubble_shooter_ui.title": "Настройки бабл шутера",
   "text.autoconfig.minigames/bubble_shooter_ui.option.background": "Задний фон",
   "text.autoconfig.minigames/bubble_shooter_ui.option.startColor": "Начальный цвет (Только для режима кастомного градиента)",
   "text.autoconfig.minigames/bubble_shooter_ui.option.endColor": "Конечный цвет (Только для режима кастомного градиента)",
   "text.autoconfig.minigames/bubble_shooter_ui.option.volume": "Громкость",
-
   "text.autoconfig.minigames/cookie_clicker_ui.title": "Настройки куки кликера",
   "text.autoconfig.minigames/cookie_clicker_ui.option.volume": "Громкость",
   "text.autoconfig.minigames/cookie_clicker_ui.option.cookieClickerSounds": "Звуки из куки кликера",
   "text.autoconfig.minigames/cookie_clicker_ui.option.maxCookieRate": "Максимальный спавн печенек на фоне",
-
   "text.autoconfig.minigames/solitaire_ui.title": "Настройки косынки",
   "text.autoconfig.minigames/solitaire_ui.option.volume": "Громкость",
-
   "screen.minigames.list.title": "Мини-игры",
   "screen.minigames.list.empty": "Нет установленных миниигр",
   "minigame.restart": "Заново",
@@ -82,14 +70,11 @@
   "minigame.2048.best": "РЕКОРД",
   "minigame.2048.game_over": "Игра окончена!",
   "minigame.2048.win": "Победа!",
-
   "minigame.dino.title": "Дино",
-
   "minigame.snake.title": "Змейка",
   "minigame.snake.score": "Счёт: ",
   "minigame.snake.best_score": "Лучший счёт: ",
   "minigame.2048.condition": "Поле 4x4",
-
   "minigame.sudoku.title": "Судоку",
   "minigame.sudoku.win": "Победа",
   "minigame.sudoku.condition.first": "Средняя сложность",
@@ -97,7 +82,6 @@
   "minigame.sudoku.game_over": "Конец игры!",
   "minigame.sudoku.erase": "Стереть",
   "minigame.sudoku.restart": "Заново",
-
   "minigame.bubbleshooter.title": "Бабл шутер",
   "minigame.bubbleshooter.background.filled": "Заливка",
   "minigame.bubbleshooter.background.filled_gradient": "Заливка (градиент)",
@@ -107,7 +91,6 @@
   "minigame.bubbleshooter.score": "Счет: ",
   "minigame.bubbleshooter.highScore": "Лучший счет: ",
   "minigame.bubbleshooter.gameOver": "Конец игры!",
-
   "minigame.cookieclicker.title": "Куки кликер",
   "minigame.cookieclicker.bakery": "Пекарня %s",
   "minigame.cookieclicker.cookies": "Печенек: ",
@@ -133,7 +116,6 @@
   "minigame.cookieclicker.amethyst_shard.desc": "Завершить игру",
   "minigame.cookieclicker.clicker_doubler.desc": "2x печенек за клик",
   "minigame.cookieclicker.procent_per_click": "% при покупке",
-
   "minigame.minesweeper.title": "Сапёр",
   "minigame.minesweeper.leaderboard.name": "Лидерборд",
   "minigame.minesweeper.leaderboard.mode.score": "Счёт",
@@ -149,7 +131,6 @@
   "minigame.minesweeper.leaderboard.version.script": "Версия лидерборда: %s",
   "minigame.minesweeper.leaderboard.version.api": "Версия API мода: %s",
   "minigame.minesweeper.leaderboard.version.update_mod": "Обновите мод!",
-
   "minigame.tetris.title": "Тетрис",
   "minigame.tetris.start": "Начать игру",
   "minigame.tetris.return": "Назад",
@@ -164,18 +145,14 @@
   "minigame.tetris.level": "УРОВЕНЬ",
   "minigame.tetris.high_score": "РЕКОРД",
   "minigame.tetris.new_high_score": "НОВЫЙ РЕКОРД",
-
   "minigame.solitaire.title": "Косынка",
   "minigame.solitaire.win": "Победа!",
-
   "minigame.tetris.mode.off": "Выкл",
   "minigame.tetris.mode.instant": "Мгновенный",
   "minigame.tetris.mode.outline": "Контур",
   "minigame.tetris.mode.ghost": "Призрак",
-
   "minigame.leaderboard": "Лидерборд",
   "minigame.leaderboard.conditions": "Условия",
-
   "minigame.config.btn": "Открыть конфиг",
   "minigame.layout.btn": "Перестановка мини-игр",
   "screen.minigames.layout.title": "Настройка мини-игр",
@@ -183,9 +160,15 @@
   "screen.minigames.layout.hidden_empty": "Нет скрытых мини-игр",
   "minigame.leaderboard.disabled": "Лидерборды выключены, временно, или навсегда, никто не знает...",
   "minigame.leaderboard.notSupported": "Эта мини-игра не поддерживает лидерборд",
-
   "modmenu.summaryTranslation.minigamesmod": "Добавляет много прикольных мини-игр в майнкрафт!",
   "modmenu.descriptionTranslation.minigamesmod": "Добавляет много прикольных мини-игр в майнкрафт!",
-
-  "resourcePack.minigames": "Vanilla-Style minigames"
+  "resourcePack.minigames": "Vanilla-Style minigames",
+  "text.autoconfig.minigames/blockblast_ui.title": "Настройки Block Blast",
+  "text.autoconfig.minigames/blockblast_ui.option.volume": "Громкость",
+  "minigame.blockblast.title": "Block Blast",
+  "minigame.blockblast.undo": "Назад",
+  "minigame.blockblast.score": "ОЧКИ",
+  "minigame.blockblast.best": "РЕКОРД",
+  "minigame.blockblast.game_over": "Ходов больше нет!",
+  "minigame.blockblast.condition": "Поле 8x8"
 }
